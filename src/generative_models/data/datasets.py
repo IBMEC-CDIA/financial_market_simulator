@@ -1,3 +1,5 @@
+"""Dataset utilities for reconstruction-based generative models."""
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset

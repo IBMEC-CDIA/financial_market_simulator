@@ -1,3 +1,5 @@
+"""Unit tests for SlidingWindowReconstructionDataset."""
+
 import numpy as np
 import pytest
 import torch
