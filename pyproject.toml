@@ -5,9 +5,11 @@ description = ""
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
+    "pandas",
     "torch",
     "wandb",
     "python-dotenv",
+    "yfinance>=1.7.0",
 ]
 
 [project.optional-dependencies]
