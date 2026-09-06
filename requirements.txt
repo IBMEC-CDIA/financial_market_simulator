@@ -5,7 +5,7 @@ torch==2.13.0+cu130
 numpy
 pandas
 plotly
-yfinance
+yfinance>=1.7.0
 torchinfo
 tqdm
 wandb
