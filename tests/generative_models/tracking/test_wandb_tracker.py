@@ -69,26 +69,35 @@ def test_start_run_falls_back_to_disabled_on_login_error(
     )
 
 
-@patch("generative_models.tracking.wandb_tracker.wandb")
-def test_log_metrics_forwards_to_wandb(
-    mock_wandb, monkeypatch, tmp_path
-) -> None:
-    """Check that log_metrics forwards the metrics dict to wandb.log."""
+def test_log_metrics_forwards_to_active_run(monkeypatch, tmp_path) -> None:
+    """Check that log_metrics logs through the active run object."""
     tracker = _make_tracker(monkeypatch, tmp_path)
+    tracker.wandb_run = MagicMock()
 
     tracker.log_metrics({"epoch": 1, "train/loss_mse": 0.0123})
 
-    mock_wandb.log.assert_called_once_with(
+    tracker.wandb_run.log.assert_called_once_with(
         {"epoch": 1, "train/loss_mse": 0.0123}
     )
 
 
-@patch("generative_models.tracking.wandb_tracker.wandb")
+def test_log_metrics_skips_logging_without_active_run(
+    monkeypatch, tmp_path
+) -> None:
+    """Check that log_metrics is a no-op when no run has been started."""
+    tracker = _make_tracker(monkeypatch, tmp_path)
+
+    tracker.log_metrics({"epoch": 1, "train/loss_mse": 0.0123})
+
+    assert tracker.wandb_run is None
+
+
 def test_log_metrics_prints_formatted_line_to_console(
-    _mock_wandb, monkeypatch, tmp_path, capsys
+    monkeypatch, tmp_path, capsys
 ) -> None:
     """Check that log_metrics echoes the metrics to the console."""
     tracker = _make_tracker(monkeypatch, tmp_path)
+    tracker.wandb_run = MagicMock()
 
     tracker.log_metrics({"epoch": 1, "train/loss_mse": 0.0123})
 

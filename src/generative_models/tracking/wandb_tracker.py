@@ -16,11 +16,11 @@ class WandbExperimentTracker:
     model registration and run finalization, following the same
     tracking pattern used in the training loop of the base notebook:
     an anonymous or authenticated login attempt, a `wandb.init` call
-    with a reproducible `config` dictionary, per-epoch `wandb.log`
-    calls (also echoed to the console, so progress stays visible even
-    when tracking falls back to disabled mode), a fully described
-    model artifact logged at the end of training, and an explicit
-    `finish` call.
+    with a reproducible `config` dictionary, per-epoch metric logging
+    through the active run object (also echoed to the console, so
+    progress stays visible even when tracking falls back to disabled
+    mode), a fully described model artifact logged at the end of
+    training, and an explicit `finish` call.
 
     The wandb API key is read from an environment variable using
     `python-dotenv`, so it can be provided locally through a `.env`
@@ -131,12 +131,17 @@ class WandbExperimentTracker:
     ) -> None:
         """Log a dictionary of metrics to the current run and the console.
 
-        Metrics are always forwarded to `wandb.log`, regardless of the
-        tracking mode, and also printed to the console through
-        `tqdm.write`. This keeps training progress visible in
-        notebooks even when tracking falls back to disabled mode (for
-        example, because no network connection or API key is
-        available).
+        Metrics are logged through the active run object returned by
+        `start_run` (`self.wandb_run.log`), instead of the module-level
+        `wandb.log`. This avoids a common notebook pitfall: if a
+        training cell is re-run without calling `finish_run` first,
+        wandb's global run state can end up out of sync with the run
+        actually shown on the dashboard, so metrics logged through the
+        module-level API silently land on the wrong run (or nowhere),
+        leaving the run you are looking at empty. Metrics are also
+        printed to the console through `tqdm.write`, so training
+        progress stays visible even when tracking falls back to
+        disabled mode.
 
         Parameters
         ----------
@@ -144,13 +149,17 @@ class WandbExperimentTracker:
             Mapping from metric name to its value at the current step
             (for example, `{"epoch": 1, "train/loss_mse": 0.0123}`).
         """
-        wandb.log(metrics)
-
         formatted_metrics = " | ".join(
             f"{metric_name}: {_format_metric_value(metric_value)}"
             for metric_name, metric_value in metrics.items()
         )
         tqdm.write(formatted_metrics)
+
+        if self.wandb_run is None:
+            print("[wandb] No active run; skipping metric logging.")
+            return
+
+        self.wandb_run.log(metrics)
 
     def log_model(
         self,
