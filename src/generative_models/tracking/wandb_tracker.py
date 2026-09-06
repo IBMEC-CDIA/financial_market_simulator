@@ -6,6 +6,7 @@ import torch
 import wandb
 from dotenv import load_dotenv
 from torch import nn
+from tqdm.auto import tqdm
 
 
 class WandbExperimentTracker:
@@ -16,8 +17,10 @@ class WandbExperimentTracker:
     tracking pattern used in the training loop of the base notebook:
     an anonymous or authenticated login attempt, a `wandb.init` call
     with a reproducible `config` dictionary, per-epoch `wandb.log`
-    calls, optional model artifact logging, and an explicit `finish`
-    call at the end of training.
+    calls (also echoed to the console, so progress stays visible even
+    when tracking falls back to disabled mode), a fully described
+    model artifact logged at the end of training, and an explicit
+    `finish` call.
 
     The wandb API key is read from an environment variable using
     `python-dotenv`, so it can be provided locally through a `.env`
@@ -30,7 +33,9 @@ class WandbExperimentTracker:
     config : dict[str, object]
         Dictionary with the experiment configuration (hyperparameters,
         dataset settings, random seed, etc.) that will be stored
-        alongside the run for reproducibility.
+        alongside the run for reproducibility. This same dictionary is
+        merged into the metadata of every model artifact logged with
+        `log_model`.
     env_file_path : str
         Path to the `.env` file containing the `WANDB_API_KEY`
         variable. Defaults to `.env` in the current directory.
@@ -55,6 +60,8 @@ class WandbExperimentTracker:
     ...     model=regression_model,
     ...     model_name="feed-forward-regression-model",
     ...     model_file_path="regression_model.pt",
+    ...     description="Feed-forward regressor for log-return prediction.",
+    ...     metadata={"final_train_loss": training_loss_history[-1]},
     ... )
     >>> tracker.finish_run()
     """
@@ -113,12 +120,23 @@ class WandbExperimentTracker:
             mode=self.wandb_mode,
             config=self.config,
         )
+        tqdm.write(
+            f"[wandb] Run started in '{self.wandb_mode}' mode "
+            f"(project='{self.project_name}')."
+        )
 
     def log_metrics(
         self,
         metrics: dict[str, object],
     ) -> None:
-        """Log a dictionary of metrics to the current run.
+        """Log a dictionary of metrics to the current run and the console.
+
+        Metrics are always forwarded to `wandb.log`, regardless of the
+        tracking mode, and also printed to the console through
+        `tqdm.write`. This keeps training progress visible in
+        notebooks even when tracking falls back to disabled mode (for
+        example, because no network connection or API key is
+        available).
 
         Parameters
         ----------
@@ -128,20 +146,31 @@ class WandbExperimentTracker:
         """
         wandb.log(metrics)
 
+        formatted_metrics = " | ".join(
+            f"{metric_name}: {_format_metric_value(metric_value)}"
+            for metric_name, metric_value in metrics.items()
+        )
+        tqdm.write(formatted_metrics)
+
     def log_model(
         self,
         model: nn.Module,
         model_name: str,
         model_file_path: str,
+        description: str | None = None,
         metadata: dict[str, object] | None = None,
     ) -> None:
-        """Save the model weights to disk and register as a wandb artifact.
+        """Save the model weights and register a fully described artifact.
 
         The model's `state_dict` is saved locally at `model_file_path`
         and then logged as a wandb `Artifact` of type `"model"`,
-        attached to the current run. This allows the trained weights
-        to be versioned and downloaded later from the wandb dashboard,
-        independently of the notebook that produced them.
+        attached to the current run. The artifact metadata always
+        includes the experiment `config` given to the tracker (so
+        hyperparameters are never left out), merged with any extra
+        `metadata` passed here (for example, the final training loss).
+        This allows the trained weights to be versioned, described and
+        downloaded later from the wandb dashboard, independently of
+        the notebook that produced them.
 
         Parameters
         ----------
@@ -154,10 +183,14 @@ class WandbExperimentTracker:
         model_file_path : str
             Local path where the model's `state_dict` will be saved
             (for example, `"regression_model.pt"`).
+        description : str | None
+            Optional human-readable description of the model, stored
+            alongside the artifact. Defaults to `None`.
         metadata : dict[str, object] | None
             Optional dictionary with extra information to attach to
-            the artifact (for example, architecture hyperparameters or
-            final validation loss). Defaults to `None`.
+            the artifact on top of the experiment `config` (for
+            example, the final training loss or dataset statistics).
+            Defaults to `None`.
 
         Example
         -------
@@ -165,7 +198,12 @@ class WandbExperimentTracker:
         ...     model=regression_model,
         ...     model_name="feed-forward-regression-model",
         ...     model_file_path="regression_model.pt",
-        ...     metadata={"hidden_layer_size": hidden_layer_size},
+        ...     description="Feed-forward regressor for log-return.",
+        ...     metadata={
+        ...         "final_train_loss": training_loss_history[-1],
+        ...         "return_train_mean": return_train_mean,
+        ...         "return_train_std": return_train_std,
+        ...     },
         ... )
         """
         if self.wandb_run is None:
@@ -174,16 +212,41 @@ class WandbExperimentTracker:
 
         torch.save(model.state_dict(), model_file_path)
 
+        artifact_metadata = {**self.config, **(metadata or {})}
         model_artifact = wandb.Artifact(
             name=model_name,
             type="model",
-            metadata=metadata,
+            description=description,
+            metadata=artifact_metadata,
         )
         model_artifact.add_file(model_file_path)
 
         self.wandb_run.log_artifact(model_artifact)
+        tqdm.write(
+            f"[wandb] Logged model artifact '{model_name}' "
+            f"from '{model_file_path}'."
+        )
 
     def finish_run(self) -> None:
         """Finish the current wandb run, if one is active."""
         if self.wandb_run is not None:
             self.wandb_run.finish()
+
+
+def _format_metric_value(metric_value: object) -> str:
+    """Format a metric value for console display.
+
+    Parameters
+    ----------
+    metric_value : object
+        Value to format. Floats are rendered with six decimal places;
+        any other type is converted with `str`.
+
+    Returns
+    -------
+    str
+        Human-readable representation of `metric_value`.
+    """
+    if isinstance(metric_value, float):
+        return f"{metric_value:.6f}"
+    return str(metric_value)

@@ -84,6 +84,20 @@ def test_log_metrics_forwards_to_wandb(
 
 
 @patch("generative_models.tracking.wandb_tracker.wandb")
+def test_log_metrics_prints_formatted_line_to_console(
+    _mock_wandb, monkeypatch, tmp_path, capsys
+) -> None:
+    """Check that log_metrics echoes the metrics to the console."""
+    tracker = _make_tracker(monkeypatch, tmp_path)
+
+    tracker.log_metrics({"epoch": 1, "train/loss_mse": 0.0123})
+
+    console_output = capsys.readouterr().out
+    assert "epoch: 1" in console_output
+    assert "train/loss_mse: 0.012300" in console_output
+
+
+@patch("generative_models.tracking.wandb_tracker.wandb")
 def test_log_model_skips_registration_without_active_run(
     mock_wandb, monkeypatch, tmp_path
 ) -> None:
@@ -116,6 +130,7 @@ def test_log_model_saves_weights_and_logs_artifact(
         model=model,
         model_name="test-model",
         model_file_path=str(model_file_path),
+        description="A test model.",
         metadata={"hidden_layer_size": 8},
     )
 
@@ -126,11 +141,36 @@ def test_log_model_saves_weights_and_logs_artifact(
     mock_wandb.Artifact.assert_called_once_with(
         name="test-model",
         type="model",
-        metadata={"hidden_layer_size": 8},
+        description="A test model.",
+        metadata={"learning_rate": 0.001, "hidden_layer_size": 8},
     )
     artifact = mock_wandb.Artifact.return_value
     artifact.add_file.assert_called_once_with(str(model_file_path))
     tracker.wandb_run.log_artifact.assert_called_once_with(artifact)
+
+
+@patch("generative_models.tracking.wandb_tracker.wandb")
+def test_log_model_uses_config_as_metadata_when_none_given(
+    mock_wandb, monkeypatch, tmp_path
+) -> None:
+    """Check that the experiment config is used when no metadata is given."""
+    tracker = _make_tracker(monkeypatch, tmp_path)
+    tracker.wandb_run = MagicMock()
+    model = nn.Linear(2, 1)
+    model_file_path = tmp_path / "model.pt"
+
+    tracker.log_model(
+        model=model,
+        model_name="test-model",
+        model_file_path=str(model_file_path),
+    )
+
+    mock_wandb.Artifact.assert_called_once_with(
+        name="test-model",
+        type="model",
+        description=None,
+        metadata={"learning_rate": 0.001},
+    )
 
 
 @patch("generative_models.tracking.wandb_tracker.wandb")

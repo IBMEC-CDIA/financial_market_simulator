@@ -10,6 +10,7 @@ dependencies = [
     "wandb",
     "python-dotenv",
     "yfinance>=1.7.0",
+    "tqdm",
 ]
 
 [project.optional-dependencies]
