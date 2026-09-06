@@ -9,7 +9,7 @@ dependencies = [
     "torch",
     "wandb",
     "python-dotenv",
-    "yfinance",
+    "yfinance>=1.7.0",
 ]
 
 [project.optional-dependencies]
