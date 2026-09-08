@@ -11,4 +11,3 @@ build/
 .ipynb_checkpoints/
 wandb/
 *.pt
-*.ipynb

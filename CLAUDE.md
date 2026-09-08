@@ -39,6 +39,32 @@ def func1(
   files under `docs/`, if any) is still consistent with the change; if
   it needs an update, update it right away.
 
+## About experiment tracking
+
+- Whenever a PyTorch model is trained (a training loop with an
+  optimizer and a loss function), always integrate
+  `WandbExperimentTracker` from
+  `generative_models.tracking.wandb_tracker` to track the experiment,
+  following the pattern already used in
+  `notebooks/regression_log_return_training.ipynb` and
+  `notebooks/outlier_detection_comparison.ipynb`:
+  - Instantiate the tracker with a `project_name` and a `config`
+    dictionary covering the experiment's hyperparameters (dataset
+    settings, random seed, epochs, learning rate, architecture sizes,
+    optimizer, loss function, etc.), then call `start_run()` before
+    the training loop begins.
+  - Inside the training loop, call `log_metrics` at least once per
+    epoch with the training loss (and any other relevant metric).
+  - After training finishes, call `log_model` to register the trained
+    model as a wandb artifact, passing a `description` and any extra
+    `metadata` not already covered by `config` (for example, the
+    final training loss).
+  - Call `finish_run()` once the experiment (including evaluation) is
+    complete.
+- Do not hardcode a wandb API key in code or notebooks. The key must
+  be read from a `WANDB_API_KEY` variable in a local `.env` file, as
+  already handled by `WandbExperimentTracker`.
+
 ## About notebooks
 
 - Before each code cell, add a text (Markdown) cell briefly explaining
