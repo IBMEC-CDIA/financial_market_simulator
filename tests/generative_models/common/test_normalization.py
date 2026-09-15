@@ -33,3 +33,17 @@ def test_normalize_series_applies_given_statistics_correctly() -> None:
 
     expected_normalized_values = (series_values - series_mean) / series_std
     assert torch.equal(normalized_series_values, expected_normalized_values)
+
+
+def test_normalize_series_uses_given_mean_and_std() -> None:
+    """Check that provided mean and std are used instead of being
+    computed from the series."""
+    series_values = torch.tensor([1.0, 2.0, 3.0])
+
+    normalized_series_values, series_mean, series_std = normalize_series(
+        series_values, mean=0.0, std=2.0
+    )
+
+    assert series_mean == 0.0
+    assert series_std == 2.0
+    assert torch.equal(normalized_series_values, series_values / 2.0)
