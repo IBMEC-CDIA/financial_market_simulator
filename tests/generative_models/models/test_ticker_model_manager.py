@@ -29,7 +29,7 @@ def test_constructor_starts_with_no_trained_models() -> None:
     """Check that no model is registered right after construction."""
     manager = _build_manager()
 
-    assert manager.models == {}
+    assert not manager.models
 
 
 @pytest.mark.parametrize(
