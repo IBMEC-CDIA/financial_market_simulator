@@ -1,5 +1,7 @@
 """Unit tests for TickerModelManager."""
 
+from unittest.mock import patch
+
 import pytest
 
 from generative_models.models.ticker_model_manager import TickerModelManager
@@ -39,6 +41,7 @@ def test_constructor_starts_with_no_trained_models() -> None:
         ("get_date_range", ("AAPL",)),
         ("fetch_price_data", ("AAPL",)),
         ("train_model", ("AAPL",)),
+        ("train_all_models", ()),
         ("get_model", ("AAPL",)),
     ],
 )
@@ -51,3 +54,18 @@ def test_unimplemented_methods_raise_not_implemented_error(
 
     with pytest.raises(NotImplementedError):
         getattr(manager, method_name)(*args)
+
+
+def test_train_all_models_trains_every_ticker_sequentially() -> None:
+    """Check that train_model runs once per ticker, in order."""
+    manager = _build_manager()
+
+    with patch.object(
+        TickerModelManager, "list_tickers", return_value=["AAPL", "MSFT"]
+    ), patch.object(TickerModelManager, "train_model") as mock_train_model:
+        manager.train_all_models()
+
+    assert [call.args[0] for call in mock_train_model.call_args_list] == [
+        "AAPL",
+        "MSFT",
+    ]

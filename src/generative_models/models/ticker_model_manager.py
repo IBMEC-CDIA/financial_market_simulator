@@ -95,6 +95,16 @@ class TickerModelManager:
         """
         raise NotImplementedError
 
+    def train_all_models(self) -> None:
+        """Train and register the model of every managed ticker.
+
+        The tickers are trained sequentially, one after the other, in
+        the order returned by `list_tickers`, by calling `train_model`
+        for each of them.
+        """
+        for ticker in self.list_tickers():
+            self.train_model(ticker)
+
     def get_model(self, ticker: str) -> Any:
         """Get the trained model registered for a ticker.
 
