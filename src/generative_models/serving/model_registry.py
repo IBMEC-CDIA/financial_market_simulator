@@ -1,5 +1,7 @@
 """Base interface for registries of models kept in memory."""
 
+# pylint: disable=duplicate-code
+
 from typing import Any
 
 
