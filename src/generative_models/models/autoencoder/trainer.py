@@ -19,6 +19,8 @@ from generative_models.models.autoencoder.config import (
 )
 from generative_models.tracking.wandb_tracker import WandbExperimentTracker
 
+MODEL_NAME_PREFIX = "simple-autoencoder-"
+
 
 @dataclass
 class PreparedAutoencoderData:
@@ -191,7 +193,7 @@ class AutoencoderTrainer:
         str
             Artifact name in the form `simple-autoencoder-<ticker>`.
         """
-        return f"simple-autoencoder-{build_ticker_slug(self.ticker)}"
+        return f"{MODEL_NAME_PREFIX}{build_ticker_slug(self.ticker)}"
 
     @property
     def model_file_path(self) -> Path:

@@ -112,6 +112,26 @@ Every configuration value can be overridden with a flag (for example,
 the script with `--help` for the full list. The trained weights are
 saved to `artifacts/simple-autoencoder-<ticker>.pt` by default.
 
+### Loading a trained autoencoder and predicting
+
+`WandbAutoencoderRegistry`
+(`src/generative_models/serving/wandb_autoencoder_registry.py`)
+downloads autoencoder artifacts logged by `AutoencoderTrainer` from
+Weights & Biases and wraps them in an `AutoencoderPredictor`
+(`src/generative_models/serving/autoencoder_predictor.py`), which
+normalizes new log-returns with the training statistics and flags
+windows whose reconstruction error exceeds the stored anomaly
+threshold. To load the most recently trained model and score the
+last year of prices of its ticker:
+
+```bash
+uv run python -m generative_models.serving.predict_autoencoder
+```
+
+Use `--ticker` to load the latest model of a specific ticker and
+`--start-date` / `--end-date` to change the scored period. Artifacts
+are downloaded to `artifacts/wandb/`.
+
 ## Continuous integration
 
 The workflow defined in
