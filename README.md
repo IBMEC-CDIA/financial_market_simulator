@@ -93,6 +93,25 @@ uv sync --extra dev
 uv run pytest
 ```
 
+### Training the autoencoder for a ticker
+
+`AutoencoderTrainer`
+(`src/generative_models/models/autoencoder/trainer.py`) trains the
+`SimpleAutoencoder` on the daily log-returns of one ticker, driven by
+an `AutoencoderTrainingConfig` object
+(`src/generative_models/models/autoencoder/config.py`) and tracked
+with Weights & Biases. To run it from the command line:
+
+```bash
+uv run python -m generative_models.models.autoencoder.train_autoencoder \
+    --ticker AAPL
+```
+
+Every configuration value can be overridden with a flag (for example,
+`--start-date`, `--epochs`, `--window-size`, `--learning-rate`); run
+the script with `--help` for the full list. The trained weights are
+saved to `artifacts/simple-autoencoder-<ticker>.pt` by default.
+
 ## Continuous integration
 
 The workflow defined in
