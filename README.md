@@ -49,6 +49,7 @@ financial_market_simulator/
 - **NumPy** / **Pandas** for data manipulation
 - **yfinance** for market data retrieval
 - **Weights & Biases (wandb)** for experiment tracking
+- **FastAPI** / **uvicorn** for model serving
 - **Jupyter** for notebooks
 - **pytest** for unit testing
 - **uv** as the package and environment manager
@@ -131,6 +132,38 @@ uv run python -m generative_models.serving.predict_autoencoder
 Use `--ticker` to load the latest model of a specific ticker and
 `--start-date` / `--end-date` to change the scored period. Artifacts
 are downloaded to `artifacts/wandb/`.
+
+### Serving the autoencoder with the REST API
+
+`src/generative_models/serving/api.py` exposes the trained autoencoders
+through a FastAPI application. Models are downloaded from wandb once
+and kept in memory by a process-wide singleton
+(`AutoencoderModelService`), which reuses the loading logic of the
+`predict_autoencoder` script. Start the API with:
+
+```bash
+uv run uvicorn generative_models.serving.api:app --reload
+```
+
+The interactive Swagger documentation, with every route, parameter
+and schema described, is available at `http://127.0.0.1:8000/docs`
+(ReDoc at `/redoc`). Main routes:
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/health` | Service status and models in memory. |
+| `GET` | `/models/loaded` | Metadata of the models in memory. |
+| `GET` | `/models/available` | Servable model artifacts stored in wandb. |
+| `GET` | `/models/default` | Default model (most recently trained). |
+| `POST` | `/models/reload` | Reload a model from wandb without restarting. |
+| `POST` | `/predictions/log-returns` | Detect outliers in raw log-returns. |
+| `POST` | `/predictions/prices` | Detect outliers from closing prices. |
+| `GET` | `/predictions/market` | Detect outliers in recent market data. |
+
+The API reads `WANDB_API_KEY` from `.env` and accepts the optional
+`AUTOENCODER_WANDB_PROJECT`, `AUTOENCODER_WANDB_ENTITY`,
+`AUTOENCODER_DEVICE` and `AUTOENCODER_PRELOAD_MODEL` environment
+variables.
 
 ## Continuous integration
 

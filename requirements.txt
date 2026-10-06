@@ -9,5 +9,7 @@ yfinance>=1.7.0
 torchinfo
 tqdm
 wandb
+fastapi
+uvicorn[standard]
 pgl-utils
 jupyter

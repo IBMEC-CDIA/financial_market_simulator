@@ -26,6 +26,7 @@ from generative_models.data.market_data import fetch_price_series
 from generative_models.models.autoencoder.config import TrackingConfig
 from generative_models.serving.autoencoder_predictor import (
     AutoencoderPrediction,
+    AutoencoderPredictor,
 )
 from generative_models.serving.wandb_autoencoder_registry import (
     WandbAutoencoderRegistry,
@@ -102,6 +103,72 @@ def build_prediction_table(
     )
 
 
+def load_predictor(
+    registry: WandbAutoencoderRegistry,
+    ticker: str | None = None,
+) -> AutoencoderPredictor:
+    """Load a predictor from wandb, by ticker or the most recent one.
+
+    Parameters
+    ----------
+    registry : WandbAutoencoderRegistry
+        Registry used to download the model artifact.
+    ticker : str | None
+        Ticker whose latest model is loaded. When `None`, the most
+        recently trained model of any ticker is loaded.
+
+    Returns
+    -------
+    AutoencoderPredictor
+        Predictor built from the selected artifact.
+    """
+    if ticker:
+        return registry.load_model(ticker)
+    return registry.load_latest_model()
+
+
+def predict_period(
+    predictor: AutoencoderPredictor,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    """Fetch the model ticker prices for a period and score them.
+
+    Parameters
+    ----------
+    predictor : AutoencoderPredictor
+        Loaded predictor; its metadata defines the ticker.
+    start_date : str
+        Start date of the period, in `"YYYY-MM-DD"` format.
+    end_date : str
+        End date of the period, in `"YYYY-MM-DD"` format.
+
+    Returns
+    -------
+    pd.DataFrame
+        Prediction table built by `build_prediction_table`.
+
+    Example
+    -------
+    >>> prediction_table = predict_period(
+    ...     predictor,
+    ...     start_date="2026-01-01",
+    ...     end_date="2026-06-30",
+    ... )
+    >>> list(prediction_table.columns)
+    ['close_price', 'reconstruction_score', 'is_outlier']
+    """
+    price_data = fetch_price_series(
+        predictor.metadata.ticker,
+        start_date,
+        end_date,
+    )
+    prediction = predictor.predict_from_prices(
+        price_data["close_price"].to_numpy()
+    )
+    return build_prediction_table(price_data, prediction)
+
+
 def main(
     command_line_arguments: list[str] | None = None,
 ) -> pd.DataFrame:
@@ -130,22 +197,14 @@ def main(
         entity=arguments.entity,
         device=arguments.device,
     )
-    predictor = (
-        registry.load_model(arguments.ticker)
-        if arguments.ticker
-        else registry.load_latest_model()
-    )
+    predictor = load_predictor(registry, arguments.ticker)
     metadata = predictor.metadata
 
-    price_data = fetch_price_series(
-        metadata.ticker,
+    prediction_table = predict_period(
+        predictor,
         arguments.start_date,
         arguments.end_date,
     )
-    prediction = predictor.predict_from_prices(
-        price_data["close_price"].to_numpy()
-    )
-    prediction_table = build_prediction_table(price_data, prediction)
 
     outlier_table = prediction_table[prediction_table["is_outlier"]]
     latest_window = prediction_table.iloc[-1]
