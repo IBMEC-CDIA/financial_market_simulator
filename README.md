@@ -23,6 +23,9 @@ financial_market_simulator/
 │       └── tests.yml
 │
 ├── notebooks/                  # exploratory and teaching notebooks
+├── specs/                      # module specs for students
+│   ├── training/               # training pipeline specs
+│   └── serving/                # inference and REST API specs
 │
 ├── src/
 │   └── generative_models/
@@ -112,6 +115,23 @@ Every configuration value can be overridden with a flag (for example,
 `--start-date`, `--epochs`, `--window-size`, `--learning-rate`); run
 the script with `--help` for the full list. The trained weights are
 saved to `artifacts/simple-autoencoder-<ticker>.pt` by default.
+
+### Specs for students
+
+The [`specs/`](specs/README.md) folder (written in Portuguese, for
+the students) describes, module by module, how the notebook
+`draft/autoencoder_outlier_gab_draft.ipynb` is converted into the
+`generative_models` package: the public interface, the expected
+behavior and errors, and numbered acceptance criteria that must be
+turned into unit tests. The specs are split into two tracks:
+
+- [`specs/training/`](specs/training/README.md): data, model,
+  configuration, tracking, trainer and training CLI;
+- [`specs/serving/`](specs/serving/README.md): predictor, wandb
+  model registry, prediction CLI, model service and REST API.
+
+Start from [`specs/README.md`](specs/README.md), which explains the
+workflow and the order of the tracks.
 
 ### Loading a trained autoencoder and predicting
 
