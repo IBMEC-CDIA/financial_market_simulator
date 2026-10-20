@@ -73,7 +73,8 @@ support, TensorFlow, Jupyter, Weights & Biases, and other tooling used
 locally):
 
 ```bash
-uv pip install -r requirements.txt
+uv pip install --index-strategy unsafe-best-match -r requirements.txt
+uv pip install -e .
 ```
 
 Copy the environment variable template and fill in the required
