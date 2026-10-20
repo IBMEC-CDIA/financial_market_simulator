@@ -6,6 +6,7 @@ e adicione-a à tabela de ordem do `README.md` dessa trilha.
 - **Arquivo:** `src/generative_models/<pacote>/<modulo>.py`
 - **Arquivo de teste:** `tests/generative_models/<pacote>/test_<modulo>.py`
 - **Depende de:** specs NN, NN, `<trilha>/NN` (ou "nenhuma")
+- **Situação:** a implementar (ou "fornecido")
 
 ## Objetivo
 

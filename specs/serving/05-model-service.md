@@ -3,6 +3,7 @@
 - **Arquivo:** `src/generative_models/serving/model_service.py`
 - **Arquivo de teste:** `tests/generative_models/serving/test_model_service.py`
 - **Depende de:** specs 03 e 04
+- **Situação:** a implementar
 
 ## Objetivo
 

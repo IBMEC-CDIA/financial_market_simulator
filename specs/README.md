@@ -22,13 +22,27 @@ Cada pasta tem um `README.md` com a ordem das specs e o mapa entre as
 células do notebook (ou os módulos de treino) e os módulos a
 implementar.
 
+## Situação das specs
+
+Cada spec traz, no cabeçalho, uma das situações abaixo:
+
+| Situação | Significado | O que fazer |
+|---|---|---|
+| **A implementar** | O módulo e os testes não existem no repositório. | Siga o fluxo de trabalho completo. |
+| **Fornecido** | O módulo e os testes já existem, porque o notebook de partida já os importa do pacote. | Leia a spec e os testes existentes como referência; não reimplemente. |
+
+Os módulos fornecidos são `data/market_data.py`, `data/datasets.py`,
+`common/normalization.py`, `tracking/wandb_tracker.py` e
+`serving/model_registry.py`. Eles mostram, em código já pronto, o
+padrão de implementação e de testes esperado nas specs a implementar.
+
 Dentro de uma trilha, uma referência como "spec 05" aponta para a
 spec 05 da mesma pasta. Referências entre trilhas usam o nome da
 pasta, por exemplo `training/07` ou `serving/03`.
 
 ## Fluxo de trabalho
 
-Para cada spec, na ordem do `README.md` da trilha:
+Para cada spec **a implementar**, na ordem do `README.md` da trilha:
 
 1. Leia a spec inteira e localize a origem indicada em **Origem**
    (células do notebook ou módulos já implementados).

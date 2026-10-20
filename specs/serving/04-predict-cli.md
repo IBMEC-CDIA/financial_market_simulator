@@ -3,6 +3,7 @@
 - **Arquivo:** `src/generative_models/serving/predict_autoencoder.py`
 - **Arquivo de teste:** `tests/generative_models/serving/test_predict_autoencoder.py`
 - **Depende de:** specs 01 e 03, `training/01`
+- **Situação:** a implementar
 
 ## Objetivo
 

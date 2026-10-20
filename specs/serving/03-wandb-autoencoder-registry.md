@@ -3,6 +3,7 @@
 - **Arquivo:** `src/generative_models/serving/wandb_autoencoder_registry.py`
 - **Arquivo de teste:** `tests/generative_models/serving/test_wandb_autoencoder_registry.py`
 - **Depende de:** specs 01 e 02, `training/05`, `training/07`
+- **Situação:** a implementar
 
 ## Objetivo
 

@@ -3,6 +3,7 @@
 - **Arquivo:** `src/generative_models/serving/api.py`
 - **Arquivo de teste:** `tests/generative_models/serving/test_api.py`
 - **Depende de:** specs 01, 04, 05 e 06
+- **Situação:** a implementar
 
 ## Objetivo
 

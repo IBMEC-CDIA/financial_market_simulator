@@ -3,6 +3,8 @@
 - **Arquivo:** `src/generative_models/data/datasets.py`
 - **Arquivo de teste:** `tests/generative_models/data/test_datasets.py`
 - **Depende de:** nenhuma
+- **Situação:** fornecido. O módulo e os testes já existem no repositório;
+  use esta spec e os testes como referência.
 
 ## Objetivo
 

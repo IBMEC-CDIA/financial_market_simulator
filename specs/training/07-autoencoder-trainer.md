@@ -3,6 +3,7 @@
 - **Arquivo:** `src/generative_models/models/autoencoder/trainer.py`
 - **Arquivo de teste:** `tests/generative_models/models/autoencoder/test_trainer.py`
 - **Depende de:** specs 01 a 06
+- **Situação:** a implementar
 
 ## Objetivo
 

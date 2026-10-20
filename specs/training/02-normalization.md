@@ -3,6 +3,8 @@
 - **Arquivo:** `src/generative_models/common/normalization.py`
 - **Arquivo de teste:** `tests/generative_models/common/test_normalization.py`
 - **Depende de:** nenhuma
+- **Situação:** fornecido. O módulo e os testes já existem no repositório;
+  use esta spec e os testes como referência.
 
 ## Objetivo
 

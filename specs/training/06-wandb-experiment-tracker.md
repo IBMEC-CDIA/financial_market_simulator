@@ -3,6 +3,8 @@
 - **Arquivo:** `src/generative_models/tracking/wandb_tracker.py`
 - **Arquivo de teste:** `tests/generative_models/tracking/test_wandb_tracker.py`
 - **Depende de:** nenhuma
+- **Situação:** fornecido. O módulo e os testes já existem no repositório;
+  use esta spec e os testes como referência.
 
 ## Objetivo
 

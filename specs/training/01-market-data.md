@@ -3,6 +3,8 @@
 - **Arquivo:** `src/generative_models/data/market_data.py`
 - **Arquivo de teste:** `tests/generative_models/data/test_market_data.py`
 - **Depende de:** nenhuma
+- **Situação:** fornecido. O módulo e os testes já existem no repositório;
+  use esta spec e os testes como referência.
 
 ## Objetivo
 
@@ -12,9 +14,9 @@ não dependa diretamente da API do `yfinance`.
 
 ## Origem no notebook
 
-- Célula 12: `fetch_price_series(TICKER, START_DATE, END_DATE)`. No
-  notebook a função vem pronta do pacote; aqui ela passa a ser
-  implementada por você.
+- Célula 12: `fetch_price_series(TICKER, START_DATE, END_DATE)`. O
+  notebook já importa a função pronta do pacote; esta spec documenta
+  o contrato que o pipeline de treino (spec 07) usa.
 - Célula 16: cálculo do log-retorno
   `log(price[t + 1]) - log(price[t])`, aqui em uma versão baseada em
   `numpy`.

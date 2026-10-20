@@ -3,6 +3,7 @@
 - **Arquivo:** `src/generative_models/models/autoencoder/config.py`
 - **Arquivo de teste:** `tests/generative_models/models/autoencoder/test_config.py`
 - **Depende de:** nenhuma
+- **Situação:** a implementar
 
 ## Objetivo
 

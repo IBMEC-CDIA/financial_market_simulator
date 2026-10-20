@@ -5,6 +5,7 @@
   `tests/generative_models/serving/test_api.py` (spec 07). Um arquivo
   `test_api_schemas.py` é opcional para os critérios abaixo.
 - **Depende de:** nenhuma
+- **Situação:** a implementar
 
 ## Objetivo
 
