@@ -23,6 +23,9 @@ financial_market_simulator/
 │       └── tests.yml
 │
 ├── notebooks/                  # exploratory and teaching notebooks
+├── specs/                      # module specs for students
+│   ├── training/               # training pipeline specs
+│   └── serving/                # inference and REST API specs
 │
 ├── src/
 │   └── generative_models/
@@ -49,6 +52,7 @@ financial_market_simulator/
 - **NumPy** / **Pandas** for data manipulation
 - **yfinance** for market data retrieval
 - **Weights & Biases (wandb)** for experiment tracking
+- **FastAPI** / **uvicorn** for model serving
 - **Jupyter** for notebooks
 - **pytest** for unit testing
 - **uv** as the package and environment manager
@@ -92,6 +96,94 @@ PyTorch and pytest) are declared in `pyproject.toml`:
 uv sync --extra dev
 uv run pytest
 ```
+
+### Training the autoencoder for a ticker
+
+`AutoencoderTrainer`
+(`src/generative_models/models/autoencoder/trainer.py`) trains the
+`SimpleAutoencoder` on the daily log-returns of one ticker, driven by
+an `AutoencoderTrainingConfig` object
+(`src/generative_models/models/autoencoder/config.py`) and tracked
+with Weights & Biases. To run it from the command line:
+
+```bash
+uv run python -m generative_models.models.autoencoder.train_autoencoder \
+    --ticker AAPL
+```
+
+Every configuration value can be overridden with a flag (for example,
+`--start-date`, `--epochs`, `--window-size`, `--learning-rate`); run
+the script with `--help` for the full list. The trained weights are
+saved to `artifacts/simple-autoencoder-<ticker>.pt` by default.
+
+### Specs for students
+
+The [`specs/`](specs/README.md) folder (written in Portuguese, for
+the students) describes, module by module, how the notebook
+`draft/autoencoder_outlier_gab_draft.ipynb` is converted into the
+`generative_models` package: the public interface, the expected
+behavior and errors, and numbered acceptance criteria that must be
+turned into unit tests. The specs are split into two tracks:
+
+- [`specs/training/`](specs/training/README.md): data, model,
+  configuration, tracking, trainer and training CLI;
+- [`specs/serving/`](specs/serving/README.md): predictor, wandb
+  model registry, prediction CLI, model service and REST API.
+
+Start from [`specs/README.md`](specs/README.md), which explains the
+workflow and the order of the tracks.
+
+### Loading a trained autoencoder and predicting
+
+`WandbAutoencoderRegistry`
+(`src/generative_models/serving/wandb_autoencoder_registry.py`)
+downloads autoencoder artifacts logged by `AutoencoderTrainer` from
+Weights & Biases and wraps them in an `AutoencoderPredictor`
+(`src/generative_models/serving/autoencoder_predictor.py`), which
+normalizes new log-returns with the training statistics and flags
+windows whose reconstruction error exceeds the stored anomaly
+threshold. To load the most recently trained model and score the
+last year of prices of its ticker:
+
+```bash
+uv run python -m generative_models.serving.predict_autoencoder
+```
+
+Use `--ticker` to load the latest model of a specific ticker and
+`--start-date` / `--end-date` to change the scored period. Artifacts
+are downloaded to `artifacts/wandb/`.
+
+### Serving the autoencoder with the REST API
+
+`src/generative_models/serving/api.py` exposes the trained autoencoders
+through a FastAPI application. Models are downloaded from wandb once
+and kept in memory by a process-wide singleton
+(`AutoencoderModelService`), which reuses the loading logic of the
+`predict_autoencoder` script. Start the API with:
+
+```bash
+uv run uvicorn generative_models.serving.api:app --reload
+```
+
+The interactive Swagger documentation, with every route, parameter
+and schema described, is available at `http://127.0.0.1:8000/docs`
+(ReDoc at `/redoc`). Main routes:
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/health` | Service status and models in memory. |
+| `GET` | `/models/loaded` | Metadata of the models in memory. |
+| `GET` | `/models/available` | Servable model artifacts stored in wandb. |
+| `GET` | `/models/default` | Default model (most recently trained). |
+| `POST` | `/models/reload` | Reload a model from wandb without restarting. |
+| `POST` | `/predictions/log-returns` | Detect outliers in raw log-returns. |
+| `POST` | `/predictions/prices` | Detect outliers from closing prices. |
+| `GET` | `/predictions/market` | Detect outliers in recent market data. |
+
+The API reads `WANDB_API_KEY` from `.env` and accepts the optional
+`AUTOENCODER_WANDB_PROJECT`, `AUTOENCODER_WANDB_ENTITY`,
+`AUTOENCODER_DEVICE` and `AUTOENCODER_PRELOAD_MODEL` environment
+variables.
 
 ## Continuous integration
 

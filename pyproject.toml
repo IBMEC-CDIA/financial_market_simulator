@@ -11,12 +11,15 @@ dependencies = [
     "python-dotenv",
     "yfinance>=1.7.0",
     "tqdm",
+    "fastapi>=0.142.2",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
     "pylint",
+    "httpx>=0.28.1",
 ]
 
 [build-system]
