@@ -228,9 +228,9 @@ test suite automatically:
 - and when a pull request is merged into `main`.
 
 The same workflow has a second job, `train`, which only runs after the
-`test` job passes. It runs on every push to `main` and can also be
+`test` job passes. It runs on every push to any branch and can also be
 started by hand from the Actions tab, where the ticker is chosen
-(default `AAPL`). It trains the autoencoder for that ticker and uploads
+(default `AAPL`). Each push therefore logs a new run to wandb. It trains the autoencoder for that ticker and uploads
 the `.pt` weights as a workflow artifact.
 
 Training logs the run and the model artifact to wandb, so the workflow
