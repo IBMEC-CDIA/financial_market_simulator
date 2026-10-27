@@ -124,9 +124,97 @@ the order of the tracks.
 Once both tracks are implemented, the project can be used with:
 
 ```bash
-uv run python -m generative_models.models.autoencoder.train_autoencoder     --ticker AAPL
 uv run python -m generative_models.serving.predict_autoencoder
 uv run uvicorn generative_models.serving.api:app --reload
+```
+
+### Example: training an autoencoder from the command line
+
+The training script trains the autoencoder of one ticker, logs the run
+to wandb and saves the weights in the output directory. Only `--ticker`
+is required; every other option defaults to the values of the
+configuration dataclasses in
+`src/generative_models/models/autoencoder/config.py`.
+
+Quick run with a short history and two epochs (PowerShell):
+
+```powershell
+uv run python -m generative_models.models.autoencoder.train_autoencoder `
+    --ticker AAPL `
+    --start-date 2024-01-01 `
+    --end-date 2024-12-31 `
+    --window-size 10 `
+    --batch-size 16 `
+    --epochs 2 `
+    --device cpu
+```
+
+The same run in bash:
+
+```bash
+uv run python -m generative_models.models.autoencoder.train_autoencoder \
+    --ticker AAPL \
+    --start-date 2024-01-01 \
+    --end-date 2024-12-31 \
+    --window-size 10 \
+    --batch-size 16 \
+    --epochs 2 \
+    --device cpu
+```
+
+A complete run with the default settings (300 epochs, window of 10
+log-returns) and the wandb project and output directory set explicitly:
+
+```bash
+uv run python -m generative_models.models.autoencoder.train_autoencoder \
+    --ticker PETR4.SA \
+    --start-date 2020-01-01 \
+    --end-date 2026-09-15 \
+    --epochs 300 \
+    --learning-rate 0.001 \
+    --random-seed 42 \
+    --contamination 0.05 \
+    --project-name autoencoder-simple-outlier-trading-agent \
+    --output-directory artifacts \
+    --env-file-path .env
+```
+
+Options:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--ticker` | required | Ticker symbol, for example `AAPL` or `PETR4.SA`. |
+| `--start-date`, `--end-date` | `2020-01-01`, `2026-09-15` | Historical range (`YYYY-MM-DD`). |
+| `--train-split-ratio` | `0.8` | Fraction of the log-returns used for training, in time order. |
+| `--window-size` | `10` | Number of log-returns in each window. |
+| `--batch-size` | `32` | Windows per training batch. |
+| `--hidden-layer-size`, `--latent-layer-size` | `16`, `4` | Sizes of the autoencoder layers. |
+| `--epochs` | `300` | Number of training epochs. |
+| `--learning-rate` | `0.001` | Learning rate of the Adam optimizer. |
+| `--random-seed` | `42` | Seed for weight initialization and batch shuffling. |
+| `--contamination` | `0.05` | Expected fraction of anomalous windows; it sets the anomaly threshold. |
+| `--project-name` | `autoencoder-simple-outlier-trading-agent` | wandb project name. |
+| `--output-directory` | `artifacts` | Directory where the `.pt` weights are saved. |
+| `--env-file-path` | `.env` | `.env` file with `WANDB_API_KEY`. |
+| `--device` | automatic | `cpu` or `cuda`. |
+
+The script prints a summary line when it finishes, for example:
+
+```text
+ticker=AAPL final_train_loss=1.039433 validation_loss=0.469093 anomaly_threshold=2.228271 model_file_path=artifacts\simple-autoencoder-aapl.pt
+```
+
+The weights are saved as `<output-directory>/simple-autoencoder-<ticker>.pt`
+(the ticker is lowercased, and characters other than letters, digits,
+`.`, `_` and `-` become `-`). The wandb login uses `WANDB_API_KEY` from
+the `.env` file. Without a key, the run logs in anonymously. If the
+login fails (for example, without internet access), the run falls back
+to disabled tracking, and training still completes.
+
+Run `--help` to see the same options from the terminal:
+
+```bash
+uv run python -m generative_models.models.autoencoder.train_autoencoder --help
 ```
 
 ## Continuous integration
@@ -138,6 +226,18 @@ test suite automatically:
 - when a pull request is opened,
 - on every new commit pushed to an open pull request,
 - and when a pull request is merged into `main`.
+
+A second workflow, [`.github/workflows/train-model.yml`](.github/workflows/train-model.yml),
+runs the model tests (`tests/generative_models/models`) on every push
+to `main`. If they pass, it trains the autoencoder for one ticker and
+uploads the `.pt` weights as a workflow artifact. It can also be started
+by hand from the Actions tab, where the ticker is chosen (default
+`AAPL`).
+
+Training logs the run and the model artifact to wandb, so the workflow
+needs a `WANDB_API_KEY` repository secret (Settings > Secrets and
+variables > Actions). Without the secret, the run falls back to disabled
+tracking and the training still completes.
 
 ## Contributing guidelines
 

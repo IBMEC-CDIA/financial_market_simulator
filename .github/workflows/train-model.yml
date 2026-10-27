@@ -1,0 +1,70 @@
+name: Train model
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Ticker symbol to train on, for example AAPL"
+        required: true
+        default: "AAPL"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: train-model-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  model-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run model tests
+        run: uv run pytest tests/generative_models/models -q
+
+  train:
+    needs: model-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+      TRAIN_TICKER: ${{ inputs.ticker || 'AAPL' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Train the autoencoder model
+        run: >
+          uv run python -m generative_models.models.autoencoder.train_autoencoder
+          --ticker "$TRAIN_TICKER"
+          --device cpu
+          --output-directory artifacts
+
+      - name: Upload model weights
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoencoder-model-${{ env.TRAIN_TICKER }}
+          path: artifacts/*.pt
+          if-no-files-found: error
