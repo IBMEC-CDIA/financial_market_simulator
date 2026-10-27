@@ -23,6 +23,9 @@ financial_market_simulator/
 │       └── tests.yml
 │
 ├── notebooks/                  # exploratory and teaching notebooks
+├── specs/                      # module specs for students
+│   ├── training/               # training pipeline specs
+│   └── serving/                # inference and REST API specs
 │
 ├── src/
 │   └── generative_models/
@@ -49,6 +52,7 @@ financial_market_simulator/
 - **NumPy** / **Pandas** for data manipulation
 - **yfinance** for market data retrieval
 - **Weights & Biases (wandb)** for experiment tracking
+- **FastAPI** / **uvicorn** for model serving
 - **Jupyter** for notebooks
 - **pytest** for unit testing
 - **uv** as the package and environment manager
@@ -91,6 +95,38 @@ PyTorch and pytest) are declared in `pyproject.toml`:
 ```bash
 uv sync --extra dev
 uv run pytest
+```
+
+### Specs for students
+
+The autoencoder training pipeline and its serving layer are **not**
+part of this branch: students build them from the notebook
+`draft/autoencoder_outlier_gab_draft.ipynb`, following the specs in
+the [`specs/`](specs/README.md) folder (written in Portuguese). Each
+spec describes the public interface, the expected behavior and
+errors, and numbered acceptance criteria that must be turned into
+unit tests. The specs are split into two tracks:
+
+- [`specs/training/`](specs/training/README.md): `SimpleAutoencoder`,
+  training configuration, `AutoencoderTrainer` and a training CLI;
+- [`specs/serving/`](specs/serving/README.md): predictor, wandb
+  model registry, prediction CLI, model service singleton and a
+  FastAPI application.
+
+The base modules the notebook already imports
+(`data/market_data.py`, `data/datasets.py`, `common/normalization.py`
+and `tracking/wandb_tracker.py`), as well as the `ModelRegistry`
+interface (`serving/model_registry.py`), are provided and documented
+by their own specs as reference. Start from
+[`specs/README.md`](specs/README.md), which explains the workflow and
+the order of the tracks.
+
+Once both tracks are implemented, the project can be used with:
+
+```bash
+uv run python -m generative_models.models.autoencoder.train_autoencoder     --ticker AAPL
+uv run python -m generative_models.serving.predict_autoencoder
+uv run uvicorn generative_models.serving.api:app --reload
 ```
 
 ## Continuous integration
