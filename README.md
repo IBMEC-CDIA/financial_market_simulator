@@ -230,7 +230,9 @@ test suite automatically:
 The same workflow has a second job, `train`, which only runs after the
 `test` job passes. It runs on every push to any branch and can also be
 started by hand from the Actions tab, where the ticker is chosen
-(default `AAPL`). Each push therefore logs a new run to wandb. It trains the autoencoder for that ticker and uploads
+(default `AAPL`). It also runs on a cron schedule every 5 minutes
+(`*/5 * * * *`, in UTC). Each push and each scheduled run therefore logs
+a new run and model artifact to wandb. It trains the autoencoder for that ticker and uploads
 the `.pt` weights as a workflow artifact.
 
 Training logs the run and the model artifact to wandb, so the workflow
