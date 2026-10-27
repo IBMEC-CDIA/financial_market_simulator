@@ -227,12 +227,11 @@ test suite automatically:
 - on every new commit pushed to an open pull request,
 - and when a pull request is merged into `main`.
 
-A second workflow, [`.github/workflows/train-model.yml`](.github/workflows/train-model.yml),
-runs the model tests (`tests/generative_models/models`) on every push
-to `main`. If they pass, it trains the autoencoder for one ticker and
-uploads the `.pt` weights as a workflow artifact. It can also be started
-by hand from the Actions tab, where the ticker is chosen (default
-`AAPL`).
+The same workflow has a second job, `train`, which only runs after the
+`test` job passes. It runs on every push to `main` and can also be
+started by hand from the Actions tab, where the ticker is chosen
+(default `AAPL`). It trains the autoencoder for that ticker and uploads
+the `.pt` weights as a workflow artifact.
 
 Training logs the run and the model artifact to wandb, so the workflow
 needs a `WANDB_API_KEY` repository secret (Settings > Secrets and
