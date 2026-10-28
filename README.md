@@ -99,9 +99,8 @@ uv run pytest
 
 ### Specs for students
 
-The autoencoder training pipeline (`models/autoencoder/`) is
-implemented; the serving layer is **not** part of this branch yet.
-Both are built from the notebook
+The autoencoder training pipeline (`models/autoencoder/`) and the
+serving layer (`serving/`) are implemented. Both are built from the notebook
 `draft/autoencoder_outlier_gab_draft.ipynb`, following the specs in
 the [`specs/`](specs/README.md) folder (written in Portuguese). Each
 spec describes the public interface, the expected behavior and
@@ -129,8 +128,9 @@ uv run python -m generative_models.models.autoencoder.train_autoencoder \
     --ticker AAPL
 ```
 
-Once the serving track is implemented, predictions and the API are
-available with:
+The serving track loads the trained models back from wandb, either
+from the terminal or through the REST API (Swagger docs at
+`http://127.0.0.1:8000/docs`):
 
 ```bash
 uv run python -m generative_models.serving.predict_autoencoder
