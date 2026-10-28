@@ -100,8 +100,9 @@ uv run pytest
 
 ### Specs for students
 
-The autoencoder training pipeline and its serving layer are **not**
-part of this branch: students build them from the notebook
+The training track is implemented in
+`src/generative_models/models/autoencoder/`; the serving layer is
+**not** part of this branch yet. Students build them from the notebook
 `draft/autoencoder_outlier_gab_draft.ipynb`, following the specs in
 the [`specs/`](specs/README.md) folder (written in Portuguese). Each
 spec describes the public interface, the expected behavior and
@@ -122,10 +123,18 @@ by their own specs as reference. Start from
 [`specs/README.md`](specs/README.md), which explains the workflow and
 the order of the tracks.
 
-Once both tracks are implemented, the project can be used with:
+Train an autoencoder from the command line (run with `--help` to see
+every hyperparameter):
 
 ```bash
-uv run python -m generative_models.models.autoencoder.train_autoencoder     --ticker AAPL
+uv run python -m generative_models.models.autoencoder.train_autoencoder \
+    --ticker AAPL
+```
+
+Once the serving track is implemented, the trained models can be used
+with:
+
+```bash
 uv run python -m generative_models.serving.predict_autoencoder
 uv run uvicorn generative_models.serving.api:app --reload
 ```
