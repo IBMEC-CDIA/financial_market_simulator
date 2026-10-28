@@ -100,9 +100,9 @@ uv run pytest
 
 ### Specs for students
 
-The training track is implemented in
-`src/generative_models/models/autoencoder/`; the serving layer is
-**not** part of this branch yet. Students build them from the notebook
+Both tracks are implemented: training in
+`src/generative_models/models/autoencoder/` and serving in
+`src/generative_models/serving/`. Students build them from the notebook
 `draft/autoencoder_outlier_gab_draft.ipynb`, following the specs in
 the [`specs/`](specs/README.md) folder (written in Portuguese). Each
 spec describes the public interface, the expected behavior and
@@ -131,8 +131,9 @@ uv run python -m generative_models.models.autoencoder.train_autoencoder \
     --ticker AAPL
 ```
 
-Once the serving track is implemented, the trained models can be used
-with:
+Score recent prices with the latest model registered in wandb (or a
+specific one with `--ticker`), or serve the models through the REST
+API (interactive docs at `http://127.0.0.1:8000/docs`):
 
 ```bash
 uv run python -m generative_models.serving.predict_autoencoder
