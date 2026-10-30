@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
+  unit-tests:
     runs-on: ubuntu-latest
 
     steps:
@@ -40,11 +40,31 @@ jobs:
       - name: Run pylint
         run: uv run pylint src/generative_models tests
 
-      - name: Run tests
-        run: uv run pytest
+      - name: Run unit tests
+        run: uv run pytest --ignore=tests/end_to_end
+
+  end-to-end-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.12.10"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run end-to-end tests
+        run: uv run pytest tests/end_to_end
 
   collect-data:
-    needs: test
+    needs:
+      - unit-tests
+      - end-to-end-tests
     if: >
       github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch'

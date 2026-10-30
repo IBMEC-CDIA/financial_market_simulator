@@ -230,7 +230,12 @@ The workflow defined in
 - on every new commit pushed to an open pull request,
 - and when a pull request is merged into `main`.
 
-The same workflow has three more jobs, which only run after `test` passes
+The workflow runs the unit tests (`unit-tests`, with pylint) and the
+end-to-end tests (`end-to-end-tests`) in parallel. The `collect-data` job
+only starts when both of them pass.
+
+The same workflow has three more jobs, which only run after `collect-data`
+and its dependencies pass
 (`collect-data` and `train` are also started by hand from the Actions tab,
 where the ticker is chosen, default `AAPL`):
 
