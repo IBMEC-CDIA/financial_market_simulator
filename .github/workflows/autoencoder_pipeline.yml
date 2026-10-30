@@ -43,11 +43,46 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
-  train:
+  collect-data:
     needs: test
     if: >
       github.event_name == 'push' ||
-      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      TRAIN_TICKER: ${{ inputs.ticker || 'AAPL' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.12.10"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Collect the market prices
+        run: >
+          uv run python -m generative_models.data.collect_market_data
+          --ticker "$TRAIN_TICKER"
+          --output-path "market-data/$TRAIN_TICKER.csv"
+
+      - name: Upload market prices
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-data-${{ env.TRAIN_TICKER }}
+          path: market-data/*.csv
+          if-no-files-found: error
+
+  train:
+    needs: collect-data
+    if: >
+      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -68,19 +103,59 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      - name: Download market prices
+        uses: actions/download-artifact@v4
+        with:
+          name: market-data-${{ env.TRAIN_TICKER }}
+          path: market-data
+
       - name: Train the autoencoder model
         run: >
           uv run python -m generative_models.models.autoencoder.train_autoencoder
           --ticker "$TRAIN_TICKER"
+          --price-data-path "market-data/$TRAIN_TICKER.csv"
           --device cpu
           --output-directory artifacts
 
-      - name: Upload model weights
+      - name: Upload model weights and report
         uses: actions/upload-artifact@v4
         with:
           name: autoencoder-model-${{ env.TRAIN_TICKER }}
-          path: artifacts/*.pt
+          path: |
+            artifacts/*.pt
+            artifacts/*-overfitting.json
           if-no-files-found: error
+
+  evaluate:
+    needs: train
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      TRAIN_TICKER: ${{ inputs.ticker || 'AAPL' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.12.10"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Download model weights and report
+        uses: actions/download-artifact@v4
+        with:
+          name: autoencoder-model-${{ env.TRAIN_TICKER }}
+          path: artifacts
+
+      - name: Check overfitting
+        run: >
+          uv run python -m generative_models.models.autoencoder.overfitting
+          --report-path artifacts/*-overfitting.json
 
   build-image:
     needs: train

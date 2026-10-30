@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -56,6 +57,7 @@ class PreparedAutoencoderData:
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class AutoencoderTrainingResult:
     """Outcome of one call to `AutoencoderTrainer.train`.
 
@@ -68,6 +70,10 @@ class AutoencoderTrainingResult:
         per epoch.
     validation_loss : float
         Mean squared reconstruction error of the validation set.
+    train_evaluation_loss : float
+        Mean squared reconstruction error of the training set, computed
+        after training with the same metric as `validation_loss`. Comparing
+        the two shows whether the model overfits.
     anomaly_threshold : float
         Reconstruction score above which a window is flagged as an
         anomaly.
@@ -83,6 +89,7 @@ class AutoencoderTrainingResult:
     model: SimpleAutoencoder
     training_loss_history: list[float]
     validation_loss: float
+    train_evaluation_loss: float
     anomaly_threshold: float
     return_train_mean: float
     return_train_std: float
@@ -167,6 +174,10 @@ class AutoencoderTrainer:
     experiment_tracker : WandbExperimentTracker, optional
         Tracker used to log the run. When `None`, a tracker is created
         from the `tracking` settings of `config`.
+    price_data : pd.DataFrame, optional
+        Prices already collected, with a `"close_price"` column, such as
+        the ones saved by `collect_market_data`. When `None`, the prices
+        are downloaded from yfinance.
 
     Attributes
     ----------
@@ -179,6 +190,8 @@ class AutoencoderTrainer:
         `"cuda"` when available and `"cpu"` otherwise.
     experiment_tracker : WandbExperimentTracker
         Tracker that receives the metrics and the model artifact.
+    price_data : pd.DataFrame | None
+        Prices given at construction, or `None` to download them.
 
     Example
     -------
@@ -196,10 +209,12 @@ class AutoencoderTrainer:
         ticker: str,
         config: AutoencoderTrainingConfig,
         experiment_tracker: WandbExperimentTracker | None = None,
+        price_data: pd.DataFrame | None = None,
     ) -> None:
-        """Store the settings and prepare the device and the tracker."""
+        """Store the settings and prices, then prepare device and tracker."""
         self.ticker = ticker
         self.config = config
+        self.price_data = price_data
         self.device = self._resolve_device()
         if experiment_tracker is None:
             experiment_tracker = self._build_experiment_tracker()
@@ -230,6 +245,72 @@ class AutoencoderTrainer:
 
         return output_directory / f"{self.model_name}.pt"
 
+    def _count_training_returns(
+        self,
+        price_data: pd.DataFrame,
+        return_count: int,
+    ) -> int:
+        """Return how many of the first log-returns are used for training.
+
+        When the data frame has a `"split"` column, as the files of
+        `collect_market_data` do, the rows marked `"train"` are counted.
+        Otherwise the `train_split_ratio` of the configuration is applied.
+
+        Parameters
+        ----------
+        price_data : pd.DataFrame
+            Prices, with an optional `"split"` column.
+        return_count : int
+            Number of log-returns in the series.
+
+        Returns
+        -------
+        int
+            Number of log-returns at the start of the series that belong
+            to the training split.
+        """
+        if "split" in price_data.columns:
+            split_values = price_data["split"].dropna()
+
+            return int((split_values == "train").sum())
+
+        train_split_ratio = self.config.market_data.train_split_ratio
+
+        return int(return_count * train_split_ratio)
+
+    def _build_log_return_tensor(
+        self,
+        price_data: pd.DataFrame,
+    ) -> torch.Tensor:
+        """Return the log-returns of the prices, reusing stored ones.
+
+        When the data frame has a `"log_return"` column, as the files of
+        `collect_market_data` do, its values are used. Otherwise the
+        log-returns are computed from the `"close_price"` column.
+
+        Parameters
+        ----------
+        price_data : pd.DataFrame
+            Prices with a `"close_price"` column and, optionally, a
+            `"log_return"` column whose first row may be `NaN`.
+
+        Returns
+        -------
+        torch.Tensor
+            One-dimensional tensor of log-returns in chronological order.
+        """
+        if "log_return" in price_data.columns:
+            log_return_values = price_data["log_return"].dropna().to_numpy()
+
+            return torch.tensor(log_return_values, dtype=torch.float32)
+
+        price_tensor = torch.tensor(
+            price_data["close_price"].to_numpy(),
+            dtype=torch.float32,
+        )
+
+        return torch.log(price_tensor[1:]) - torch.log(price_tensor[:-1])
+
     def prepare_data(self) -> PreparedAutoencoderData:
         """Fetch prices and build the normalized training data.
 
@@ -251,21 +332,19 @@ class AutoencoderTrainer:
             than `window_size`.
         """
         market_data_config = self.config.market_data
-        price_data = fetch_price_series(
-            self.ticker,
-            market_data_config.start_date,
-            market_data_config.end_date,
-        )
-        price_tensor = torch.tensor(
-            price_data["close_price"].to_numpy(),
-            dtype=torch.float32,
-        )
-        log_return_tensor = torch.log(price_tensor[1:]) - torch.log(
-            price_tensor[:-1]
-        )
+        if self.price_data is None:
+            price_data = fetch_price_series(
+                self.ticker,
+                market_data_config.start_date,
+                market_data_config.end_date,
+            )
+        else:
+            price_data = self.price_data
+        log_return_tensor = self._build_log_return_tensor(price_data)
 
-        train_size = int(
-            len(log_return_tensor) * market_data_config.train_split_ratio
+        train_size = self._count_training_returns(
+            price_data,
+            len(log_return_tensor),
         )
         train_return_tensor = log_return_tensor[:train_size]
         validation_return_tensor = log_return_tensor[train_size:]
@@ -351,12 +430,19 @@ class AutoencoderTrainer:
                 model,
                 prepared_data.train_dataset,
             )
+            train_evaluation_loss = self._evaluate(
+                model,
+                prepared_data.train_dataset,
+            )
             validation_loss = self._evaluate(
                 model,
                 prepared_data.validation_dataset,
             )
             self.experiment_tracker.log_metrics(
-                {"validation/loss_mse": validation_loss}
+                {
+                    "train/loss_mse": train_evaluation_loss,
+                    "validation/loss_mse": validation_loss,
+                }
             )
             anomaly_threshold = self._compute_anomaly_threshold(
                 model,
@@ -373,6 +459,7 @@ class AutoencoderTrainer:
                 ),
                 metadata={
                     "final_train_loss": training_loss_history[-1],
+                    "train_evaluation_loss": train_evaluation_loss,
                     "validation_loss": validation_loss,
                     "anomaly_threshold": anomaly_threshold,
                     "return_train_mean": prepared_data.return_train_mean,
@@ -386,6 +473,7 @@ class AutoencoderTrainer:
             model=model,
             training_loss_history=training_loss_history,
             validation_loss=validation_loss,
+            train_evaluation_loss=train_evaluation_loss,
             anomaly_threshold=anomaly_threshold,
             return_train_mean=prepared_data.return_train_mean,
             return_train_std=prepared_data.return_train_std,

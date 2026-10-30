@@ -2,12 +2,18 @@
 
 import argparse
 
+from generative_models.data.market_data import load_price_series
 from generative_models.models.autoencoder.config import (
     AutoencoderArchitectureConfig,
     AutoencoderTrainingConfig,
     MarketDataConfig,
     OptimizationConfig,
     TrackingConfig,
+)
+from generative_models.models.autoencoder.overfitting import (
+    build_overfitting_report,
+    build_report_path,
+    save_overfitting_report,
 )
 from generative_models.models.autoencoder.trainer import (
     AutoencoderTrainer,
@@ -113,6 +119,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=training_defaults.contamination,
         help="Expected fraction of anomalous windows.",
+    )
+    parser.add_argument(
+        "--price-data-path",
+        type=str,
+        default=None,
+        help=(
+            "CSV file with prices saved by collect_market_data. When given, "
+            "the prices are read from it instead of being downloaded, and "
+            "--start-date and --end-date are not used."
+        ),
     )
     parser.add_argument(
         "--project-name",
@@ -231,18 +247,29 @@ def main(
     arguments = parser.parse_args(command_line_arguments)
     training_config = build_training_config(arguments)
 
+    price_data = None
+    if arguments.price_data_path is not None:
+        price_data = load_price_series(arguments.price_data_path)
+
     trainer = AutoencoderTrainer(
         ticker=arguments.ticker,
         config=training_config,
+        price_data=price_data,
     )
     result = trainer.train()
+    report = build_overfitting_report(arguments.ticker, result)
+    report_path = save_overfitting_report(
+        report,
+        build_report_path(result.model_file_path),
+    )
 
     print(
         f"ticker={arguments.ticker} "
         f"final_train_loss={result.training_loss_history[-1]:.6f} "
         f"validation_loss={result.validation_loss:.6f} "
         f"anomaly_threshold={result.anomaly_threshold:.6f} "
-        f"model_file_path={result.model_file_path}"
+        f"model_file_path={result.model_file_path} "
+        f"report_path={report_path}"
     )
 
     return result

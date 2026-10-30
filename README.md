@@ -230,12 +230,31 @@ The workflow defined in
 - on every new commit pushed to an open pull request,
 - and when a pull request is merged into `main`.
 
-The same workflow has a second job, `train`, which only runs after the
-`test` job passes. It runs on every push to any branch and can also be
-started by hand from the Actions tab, where the ticker is chosen
-(default `AAPL`). Each run trains the autoencoder for that ticker,
-uploads the `.pt` weights as a workflow artifact, and logs the run and
-the model artifact to wandb.
+The same workflow has three more jobs, which only run after `test` passes
+(`collect-data` and `train` are also started by hand from the Actions tab,
+where the ticker is chosen, default `AAPL`):
+
+1. `collect-data` downloads the daily prices of the ticker with
+   `generative_models.data.collect_market_data` and saves a CSV file with
+   the `close_price`, `log_return` and `split` columns. The `split` column
+   marks the first 80% of the log-returns as `train` and the rest as
+   `validation`, in chronological order. The file is uploaded as the
+   `market-data-<ticker>` artifact.
+2. `train` downloads that artifact and trains the autoencoder with
+   `--price-data-path`, using the `split` column. After training it
+   computes the error on both splits and writes an overfitting report
+   (`*-overfitting.json`). It uploads the `.pt` weights and the report as
+   the `autoencoder-model-<ticker>` artifact.
+3. `evaluate` runs after `train`. It reads the report and fails when the
+   validation to training error ratio is above 1.5, which means the model
+   reconstructs the training data much better than unseen data.
+
+To run the same steps locally, the end-to-end test simulates the prices,
+so it does not need network access or a wandb key:
+
+```bash
+uv run pytest tests/end_to_end
+```
 
 Training logs the run and the model artifact to wandb, so the workflow
 needs a `WANDB_API_KEY` repository secret (Settings > Secrets and

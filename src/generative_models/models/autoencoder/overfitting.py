@@ -1,0 +1,258 @@
+"""Overfitting check that compares the training and validation errors."""
+
+import argparse
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+from generative_models.models.autoencoder.trainer import (
+    AutoencoderTrainingResult,
+)
+
+DEFAULT_MAX_OVERFITTING_RATIO = 1.5
+REPORT_SUFFIX = "-overfitting.json"
+
+
+@dataclass
+class OverfittingReport:
+    """Errors of a trained model on the training and validation sets.
+
+    Parameters
+    ----------
+    ticker : str
+        Ticker symbol the model was trained on.
+    model_file_path : str
+        Local file where the trained weights were saved.
+    final_train_loss : float
+        Training loss of the last epoch, averaged during training.
+    train_evaluation_loss : float
+        Mean squared error on the training set after training.
+    validation_loss : float
+        Mean squared error on the validation set after training.
+    overfitting_ratio : float
+        `validation_loss / train_evaluation_loss`. A value well above 1
+        means the model reconstructs the training data much better than
+        data it has not seen.
+    """
+
+    ticker: str
+    model_file_path: str
+    final_train_loss: float
+    train_evaluation_loss: float
+    validation_loss: float
+    overfitting_ratio: float
+
+
+def build_overfitting_report(
+    ticker: str,
+    result: AutoencoderTrainingResult,
+) -> OverfittingReport:
+    """Build the overfitting report from the result of a training run.
+
+    Parameters
+    ----------
+    ticker : str
+        Ticker symbol the model was trained on.
+    result : AutoencoderTrainingResult
+        Result returned by `AutoencoderTrainer.train`.
+
+    Returns
+    -------
+    OverfittingReport
+        Report with the errors and the validation to training ratio.
+
+    Raises
+    ------
+    ValueError
+        If the training error is not positive, so the ratio is undefined.
+
+    Example
+    -------
+    >>> report = build_overfitting_report("AAPL", result)
+    >>> report.overfitting_ratio
+    1.2
+    """
+    train_evaluation_loss = result.train_evaluation_loss
+    if train_evaluation_loss <= 0:
+        raise ValueError(
+            "The training loss must be positive to compute the ratio."
+        )
+
+    return OverfittingReport(
+        ticker=ticker,
+        model_file_path=str(result.model_file_path),
+        final_train_loss=result.training_loss_history[-1],
+        train_evaluation_loss=train_evaluation_loss,
+        validation_loss=result.validation_loss,
+        overfitting_ratio=(
+            result.validation_loss / train_evaluation_loss
+        ),
+    )
+
+
+def build_report_path(model_file_path: str | Path) -> Path:
+    """Return the path of the report saved next to a model file.
+
+    Parameters
+    ----------
+    model_file_path : str | Path
+        Path of the trained weights, for example
+        `artifacts/simple-autoencoder-aapl.pt`.
+
+    Returns
+    -------
+    Path
+        Path in the form
+        `artifacts/simple-autoencoder-aapl-overfitting.json`.
+    """
+    model_path = Path(model_file_path)
+
+    return model_path.with_name(model_path.stem + REPORT_SUFFIX)
+
+
+def save_overfitting_report(
+    report: OverfittingReport,
+    output_path: str | Path,
+) -> Path:
+    """Write the report as a JSON file, creating its directory if needed.
+
+    Parameters
+    ----------
+    report : OverfittingReport
+        Report to write.
+    output_path : str | Path
+        Path of the JSON file.
+
+    Returns
+    -------
+    Path
+        Path of the written file.
+    """
+    file_path = Path(output_path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(
+        json.dumps(asdict(report), indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    return file_path
+
+
+def load_overfitting_report(
+    input_path: str | Path,
+) -> OverfittingReport:
+    """Read a report written by `save_overfitting_report`.
+
+    Parameters
+    ----------
+    input_path : str | Path
+        Path of the JSON file.
+
+    Returns
+    -------
+    OverfittingReport
+        Report stored in the file.
+    """
+    report_data = json.loads(Path(input_path).read_text(encoding="utf-8"))
+
+    return OverfittingReport(**report_data)
+
+
+def is_overfitting_within_limit(
+    report: OverfittingReport,
+    max_overfitting_ratio: float,
+) -> bool:
+    """Tell whether the validation to training ratio is acceptable.
+
+    Parameters
+    ----------
+    report : OverfittingReport
+        Report of the training run.
+    max_overfitting_ratio : float
+        Largest accepted `overfitting_ratio`, inclusive.
+
+    Returns
+    -------
+    bool
+        `True` when the ratio is at most `max_overfitting_ratio`.
+
+    Example
+    -------
+    >>> is_overfitting_within_limit(report, max_overfitting_ratio=1.5)
+    True
+    """
+    return report.overfitting_ratio <= max_overfitting_ratio
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    """Create the parser of the overfitting evaluation script.
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        Parser that accepts `--report-path` (required) and
+        `--max-overfitting-ratio`.
+    """
+    parser = argparse.ArgumentParser(
+        description="Check the overfitting report of a training run.",
+    )
+    parser.add_argument(
+        "--report-path",
+        type=str,
+        required=True,
+        help="JSON report written by the training script.",
+    )
+    parser.add_argument(
+        "--max-overfitting-ratio",
+        type=float,
+        default=DEFAULT_MAX_OVERFITTING_RATIO,
+        help="Largest accepted validation to training loss ratio.",
+    )
+
+    return parser
+
+
+def main(
+    command_line_arguments: list[str] | None = None,
+) -> bool:
+    """Print the overfitting report and tell whether it passes the check.
+
+    Parameters
+    ----------
+    command_line_arguments : list[str] | None
+        Arguments to parse. When `None`, the arguments of `sys.argv`
+        are used.
+
+    Returns
+    -------
+    bool
+        `True` when the ratio is within the limit. A summary line is also
+        printed.
+
+    Example
+    -------
+    >>> main(["--report-path", "artifacts/model-overfitting.json"])
+    True
+    """
+    parser = build_argument_parser()
+    arguments = parser.parse_args(command_line_arguments)
+    report = load_overfitting_report(arguments.report_path)
+    is_within_limit = is_overfitting_within_limit(
+        report,
+        arguments.max_overfitting_ratio,
+    )
+
+    print(
+        f"ticker={report.ticker} "
+        f"train_loss={report.train_evaluation_loss:.6f} "
+        f"validation_loss={report.validation_loss:.6f} "
+        f"overfitting_ratio={report.overfitting_ratio:.3f} "
+        f"max_overfitting_ratio={arguments.max_overfitting_ratio:.3f} "
+        f"passed={is_within_limit}"
+    )
+
+    return is_within_limit
+
+
+if __name__ == "__main__":
+    raise SystemExit(0 if main() else 1)

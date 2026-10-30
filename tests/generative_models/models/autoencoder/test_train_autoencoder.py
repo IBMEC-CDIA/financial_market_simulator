@@ -2,8 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
+from generative_models.data.market_data import save_price_series
 from generative_models.models.autoencoder.config import (
     AutoencoderTrainingConfig,
 )
@@ -17,6 +19,22 @@ TRAINER_PATH = (
     "generative_models.models.autoencoder.train_autoencoder."
     "AutoencoderTrainer"
 )
+
+
+@pytest.fixture(autouse=True)
+def run_in_temporary_directory(tmp_path, monkeypatch) -> None:
+    """Run each test in a temporary directory, so reports are not left behind."""
+    monkeypatch.chdir(tmp_path)
+
+
+def _configure_trainer_result(mock_trainer_class) -> None:
+    """Give the mocked trainer a result with the fields main reads."""
+    result = mock_trainer_class.return_value.train.return_value
+    result.training_loss_history = [0.5]
+    result.train_evaluation_loss = 0.2
+    result.validation_loss = 0.3
+    result.anomaly_threshold = 0.9
+    result.model_file_path = "model.pt"
 
 
 def _parse_configuration(command_line_arguments: list[str]):
@@ -93,6 +111,7 @@ def test_main_creates_trainer_and_returns_its_result(
     """Check that main builds the trainer and returns the train result."""
     mock_trainer = mock_trainer_class.return_value
     mock_trainer.train.return_value.training_loss_history = [0.5, 0.25]
+    mock_trainer.train.return_value.train_evaluation_loss = 0.2
     mock_trainer.train.return_value.validation_loss = 0.3
     mock_trainer.train.return_value.anomaly_threshold = 0.9
     mock_trainer.train.return_value.model_file_path = "model.pt"
@@ -118,10 +137,56 @@ def test_main_rejects_invalid_epochs_before_creating_trainer(
 
 
 @patch(TRAINER_PATH)
+def test_main_loads_prices_from_price_data_path(
+    mock_trainer_class,
+    tmp_path,
+) -> None:
+    """Check that --price-data-path is read and given to the trainer."""
+    price_data = pd.DataFrame(
+        {"close_price": [100.0, 101.0, 102.0]},
+        index=pd.to_datetime(
+            ["2026-01-02", "2026-01-05", "2026-01-06"],
+        ).rename("date"),
+    )
+    price_data_path = tmp_path / "AAPL.csv"
+    save_price_series(price_data, price_data_path)
+    _configure_trainer_result(mock_trainer_class)
+
+    main(
+        [
+            "--ticker",
+            "AAPL",
+            "--price-data-path",
+            str(price_data_path),
+        ]
+    )
+
+    trainer_kwargs = mock_trainer_class.call_args.kwargs
+    pd.testing.assert_frame_equal(
+        trainer_kwargs["price_data"],
+        price_data,
+        check_freq=False,
+    )
+
+
+@patch(TRAINER_PATH)
+def test_main_downloads_prices_without_price_data_path(
+    mock_trainer_class,
+) -> None:
+    """Check that the trainer gets no prices when no file is given."""
+    _configure_trainer_result(mock_trainer_class)
+
+    main(["--ticker", "AAPL", "--epochs", "1"])
+
+    assert mock_trainer_class.call_args.kwargs["price_data"] is None
+
+
+@patch(TRAINER_PATH)
 def test_main_prints_a_summary_line(mock_trainer_class, capsys) -> None:
     """Check that the summary line contains the ticker and the path."""
     mock_trainer = MagicMock()
     mock_trainer.train.return_value.training_loss_history = [0.5]
+    mock_trainer.train.return_value.train_evaluation_loss = 0.2
     mock_trainer.train.return_value.validation_loss = 0.3
     mock_trainer.train.return_value.anomaly_threshold = 0.9
     mock_trainer.train.return_value.model_file_path = "model.pt"

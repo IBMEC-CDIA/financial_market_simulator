@@ -16,6 +16,10 @@ from generative_models.models.autoencoder.config import (
     OptimizationConfig,
     TrackingConfig,
 )
+from generative_models.data.market_data import (
+    add_log_return_column,
+    add_split_column,
+)
 from generative_models.models.autoencoder.trainer import (
     AutoencoderTrainer,
     build_ticker_slug,
@@ -95,6 +99,69 @@ def test_model_name_and_file_path_depend_on_ticker(tmp_path) -> None:
     assert trainer.model_file_path == (
         tmp_path / "simple-autoencoder-petr4.sa.pt"
     )
+
+
+@patch(FETCH_PRICE_SERIES_PATH)
+def test_prepare_data_uses_given_prices_without_downloading(
+    mock_fetch_price_series, tmp_path
+) -> None:
+    """Check that prices passed to the trainer are used instead of fetched."""
+    trainer = AutoencoderTrainer(
+        ticker="PETR4.SA",
+        config=_make_config(tmp_path),
+        experiment_tracker=MagicMock(),
+        price_data=_make_price_frame(101),
+    )
+
+    prepared_data = trainer.prepare_data()
+
+    mock_fetch_price_series.assert_not_called()
+    assert len(prepared_data.train_dataset) == 76
+    assert len(prepared_data.validation_dataset) == 16
+
+
+@patch(FETCH_PRICE_SERIES_PATH)
+def test_prepare_data_reuses_stored_log_returns(
+    mock_fetch_price_series, tmp_path
+) -> None:
+    """Check that a stored log_return column gives the same windows."""
+    price_data = add_log_return_column(_make_price_frame(101))
+    trainer = AutoencoderTrainer(
+        ticker="PETR4.SA",
+        config=_make_config(tmp_path),
+        experiment_tracker=MagicMock(),
+        price_data=price_data,
+    )
+
+    prepared_data = trainer.prepare_data()
+
+    mock_fetch_price_series.assert_not_called()
+    assert len(prepared_data.train_dataset) == 76
+    assert len(prepared_data.validation_dataset) == 16
+    assert len(prepared_data.full_dataset) == 96
+
+
+@patch(FETCH_PRICE_SERIES_PATH)
+def test_prepare_data_uses_the_stored_split_column(
+    mock_fetch_price_series, tmp_path
+) -> None:
+    """Check that the train rows of the split column set the training size."""
+    price_data = add_split_column(
+        add_log_return_column(_make_price_frame(101)),
+        train_split_ratio=0.5,
+    )
+    trainer = AutoencoderTrainer(
+        ticker="PETR4.SA",
+        config=_make_config(tmp_path),
+        experiment_tracker=MagicMock(),
+        price_data=price_data,
+    )
+
+    prepared_data = trainer.prepare_data()
+
+    mock_fetch_price_series.assert_not_called()
+    assert len(prepared_data.train_dataset) == 46
+    assert len(prepared_data.validation_dataset) == 46
 
 
 @patch(FETCH_PRICE_SERIES_PATH)
@@ -204,7 +271,7 @@ def test_train_returns_finite_results(
 def test_log_model_metadata_contains_training_summary(
     mock_fetch_price_series, tmp_path
 ) -> None:
-    """Check that the artifact metadata includes the five summary keys."""
+    """Check that the artifact metadata includes the six summary keys."""
     mock_fetch_price_series.return_value = _make_price_frame(101)
     experiment_tracker = MagicMock()
     trainer = _make_trainer(tmp_path, experiment_tracker)
@@ -214,6 +281,7 @@ def test_log_model_metadata_contains_training_summary(
     metadata = experiment_tracker.log_model.call_args.kwargs["metadata"]
     assert set(metadata.keys()) == {
         "final_train_loss",
+        "train_evaluation_loss",
         "validation_loss",
         "anomaly_threshold",
         "return_train_mean",
