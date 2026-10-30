@@ -242,11 +242,11 @@ needs a `WANDB_API_KEY` repository secret (Settings > Secrets and
 variables > Actions). Without the secret, the run falls back to disabled
 tracking and the training still completes.
 
-After the training steps, the `train` job builds the Docker image from the
-[`Dockerfile`](Dockerfile), logs in to Docker Hub, and pushes the image
-with the `latest` tag and the commit SHA tag. This happens on every
-branch. The build and push steps run only if training finished
-successfully. The workflow needs these repository secrets:
+The image is built by its own job, `build-image`, which starts after
+`train` succeeds. It saves the image as a workflow artifact, and the
+`push-image` job loads it, logs in to Docker Hub and pushes it with the
+`latest` tag and the commit SHA tag. Both jobs run on every branch, and
+training failures stop them. The workflow needs these repository secrets:
 
 - `DOCKERHUB_USERNAME`: the Docker Hub account name. The image is
   published as `<DOCKERHUB_USERNAME>/financial-market-simulator`.
