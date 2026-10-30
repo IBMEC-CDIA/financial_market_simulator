@@ -23,7 +23,7 @@ TRAINER_PATH = (
 
 @pytest.fixture(autouse=True)
 def run_in_temporary_directory(tmp_path, monkeypatch) -> None:
-    """Run each test in a temporary directory, so reports are not left behind."""
+    """Run each test in a temporary folder, so no file is left behind."""
     monkeypatch.chdir(tmp_path)
 
 

@@ -3,10 +3,11 @@
 import os
 
 import torch
-import wandb
 from dotenv import load_dotenv
 from torch import nn
 from tqdm.auto import tqdm
+
+import wandb
 
 
 class WandbExperimentTracker:
