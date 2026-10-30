@@ -20,7 +20,10 @@ financial_market_simulator/
 ├── .github/
 │   ├── copilot-instructions.md
 │   └── workflows/
-│       └── tests.yml
+│       └── autoencoder_pipeline.yml
+│
+├── Dockerfile                  # image that serves the FastAPI autoencoder API
+├── .dockerignore
 │
 ├── notebooks/                  # exploratory and teaching notebooks
 ├── specs/                      # module specs for students
@@ -220,8 +223,8 @@ uv run python -m generative_models.models.autoencoder.train_autoencoder --help
 ## Continuous integration
 
 The workflow defined in
-[`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs the
-test suite automatically:
+[`.github/workflows/autoencoder_pipeline.yml`](.github/workflows/autoencoder_pipeline.yml)
+(named "Autoencoder Pipeline") runs the test suite automatically:
 
 - when a pull request is opened,
 - on every new commit pushed to an open pull request,
@@ -239,6 +242,40 @@ Training logs the run and the model artifact to wandb, so the workflow
 needs a `WANDB_API_KEY` repository secret (Settings > Secrets and
 variables > Actions). Without the secret, the run falls back to disabled
 tracking and the training still completes.
+
+The workflow also has a `docker` job, which runs after `test` on pushes
+and manual runs (not on the cron schedule). It builds the image from the
+[`Dockerfile`](Dockerfile) and pushes it to Docker Hub only when the
+push is to `main`; pushes to other branches just build the image. Each
+image gets the `latest` tag and a tag with the commit SHA. It needs these
+repository secrets:
+
+- `DOCKERHUB_USERNAME`: the Docker Hub account name. The image is
+  published as `<DOCKERHUB_USERNAME>/financial-market-simulator`.
+- `DOCKERHUB_TOKEN`: a Docker Hub access token with write permission.
+
+The image serves the trained autoencoders through the FastAPI application
+in `generative_models.serving.api`, on port `8000`. To run it locally:
+
+```bash
+docker build -t financial-market-simulator .
+docker run --rm -p 8000:8000 \
+    -e WANDB_API_KEY=... \
+    financial-market-simulator
+```
+
+Then open `http://127.0.0.1:8000/docs` for the interactive API docs, or
+`http://127.0.0.1:8000/health` to check the service. At startup the
+container loads the default model from wandb, so it needs `WANDB_API_KEY`
+at runtime. The `.env` file is not copied into the image, so pass the key
+with `-e` or with `--env-file .env`. The container accepts these optional
+variables:
+
+- `AUTOENCODER_WANDB_PROJECT`: wandb project that holds the models.
+- `AUTOENCODER_WANDB_ENTITY`: wandb entity (user or team).
+- `AUTOENCODER_DEVICE`: `cpu` or `cuda`. Defaults to `cuda` when available.
+- `AUTOENCODER_PRELOAD_MODEL`: `false` to skip loading the default model
+  at startup.
 
 ## Contributing guidelines
 

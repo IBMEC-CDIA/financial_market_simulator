@@ -55,7 +55,7 @@ Para cada spec **a implementar**, na ordem do `README.md` da trilha:
 5. Rode `uv run pylint src/generative_models tests` e
    `uv run pytest` até ficarem verdes.
 6. Abra um pull request com a spec implementada. A CI
-   (`.github/workflows/tests.yml`) executa as mesmas verificações.
+   (`.github/workflows/autoencoder_pipeline.yml`) executa as mesmas verificações.
 
 Só avance para a próxima spec quando a anterior estiver verde: cada
 módulo depende dos anteriores.
