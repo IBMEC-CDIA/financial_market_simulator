@@ -233,22 +233,20 @@ The workflow defined in
 The same workflow has a second job, `train`, which only runs after the
 `test` job passes. It runs on every push to any branch and can also be
 started by hand from the Actions tab, where the ticker is chosen
-(default `AAPL`). It also runs on a cron schedule every 5 minutes
-(`*/5 * * * *`, in UTC). Each push and each scheduled run therefore logs
-a new run and model artifact to wandb. It trains the autoencoder for that ticker and uploads
-the `.pt` weights as a workflow artifact.
+(default `AAPL`). Each run trains the autoencoder for that ticker,
+uploads the `.pt` weights as a workflow artifact, and logs the run and
+the model artifact to wandb.
 
 Training logs the run and the model artifact to wandb, so the workflow
 needs a `WANDB_API_KEY` repository secret (Settings > Secrets and
 variables > Actions). Without the secret, the run falls back to disabled
 tracking and the training still completes.
 
-The workflow also has a `docker` job, which runs after `test` on pushes
-and manual runs (not on the cron schedule). It builds the image from the
-[`Dockerfile`](Dockerfile) and pushes it to Docker Hub only when the
-push is to `main`; pushes to other branches just build the image. Each
-image gets the `latest` tag and a tag with the commit SHA. It needs these
-repository secrets:
+After the training steps, the `train` job builds the Docker image from the
+[`Dockerfile`](Dockerfile), logs in to Docker Hub, and pushes the image
+with the `latest` tag and the commit SHA tag. This happens on every
+branch. The build and push steps run only if training finished
+successfully. The workflow needs these repository secrets:
 
 - `DOCKERHUB_USERNAME`: the Docker Hub account name. The image is
   published as `<DOCKERHUB_USERNAME>/financial-market-simulator`.
