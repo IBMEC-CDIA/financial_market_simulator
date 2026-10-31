@@ -32,6 +32,8 @@ def _configure_trainer_result(mock_trainer_class) -> None:
     result = mock_trainer_class.return_value.train.return_value
     result.training_loss_history = [0.5]
     result.train_evaluation_loss = 0.2
+    result.test_loss = 0.25
+    result.baseline_test_loss = 0.9
     result.validation_loss = 0.3
     result.anomaly_threshold = 0.9
     result.model_file_path = "model.pt"
@@ -112,6 +114,8 @@ def test_main_creates_trainer_and_returns_its_result(
     mock_trainer = mock_trainer_class.return_value
     mock_trainer.train.return_value.training_loss_history = [0.5, 0.25]
     mock_trainer.train.return_value.train_evaluation_loss = 0.2
+    mock_trainer.train.return_value.test_loss = 0.25
+    mock_trainer.train.return_value.baseline_test_loss = 0.9
     mock_trainer.train.return_value.validation_loss = 0.3
     mock_trainer.train.return_value.anomaly_threshold = 0.9
     mock_trainer.train.return_value.model_file_path = "model.pt"
@@ -187,6 +191,8 @@ def test_main_prints_a_summary_line(mock_trainer_class, capsys) -> None:
     mock_trainer = MagicMock()
     mock_trainer.train.return_value.training_loss_history = [0.5]
     mock_trainer.train.return_value.train_evaluation_loss = 0.2
+    mock_trainer.train.return_value.test_loss = 0.25
+    mock_trainer.train.return_value.baseline_test_loss = 0.9
     mock_trainer.train.return_value.validation_loss = 0.3
     mock_trainer.train.return_value.anomaly_threshold = 0.9
     mock_trainer.train.return_value.model_file_path = "model.pt"

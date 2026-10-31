@@ -15,6 +15,7 @@ REPORT_SUFFIX = "-overfitting.json"
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class OverfittingReport:
     """Errors of a trained model on the training and validation sets.
 
@@ -34,6 +35,11 @@ class OverfittingReport:
         `validation_loss / train_evaluation_loss`. A value well above 1
         means the model reconstructs the training data much better than
         data it has not seen.
+    test_loss : float | None
+        Mean squared error on the held-out test set. `None` when the run
+        had no test split.
+    baseline_test_loss : float | None
+        Mean squared error of the naive zero prediction on the test set.
     """
 
     ticker: str
@@ -42,6 +48,8 @@ class OverfittingReport:
     train_evaluation_loss: float
     validation_loss: float
     overfitting_ratio: float
+    test_loss: float | None = None
+    baseline_test_loss: float | None = None
 
 
 def build_overfitting_report(
@@ -88,6 +96,8 @@ def build_overfitting_report(
         overfitting_ratio=(
             result.validation_loss / train_evaluation_loss
         ),
+        test_loss=result.test_loss,
+        baseline_test_loss=result.baseline_test_loss,
     )
 
 
@@ -185,6 +195,50 @@ def is_overfitting_within_limit(
     return report.overfitting_ratio <= max_overfitting_ratio
 
 
+def is_better_than_baseline(report: OverfittingReport) -> bool:
+    """Tell whether the model beats the naive baseline on the test set.
+
+    Parameters
+    ----------
+    report : OverfittingReport
+        Report of the training run.
+
+    Returns
+    -------
+    bool
+        `True` when the test error is smaller than the error of the naive
+        zero prediction. `False` when either value is missing.
+
+    Example
+    -------
+    >>> is_better_than_baseline(report)
+    True
+    """
+    if report.test_loss is None or report.baseline_test_loss is None:
+        return False
+
+    return report.test_loss < report.baseline_test_loss
+
+
+def format_optional_loss(loss: float | None) -> str:
+    """Format a loss for the summary table, or `n/a` when it is missing.
+
+    Parameters
+    ----------
+    loss : float | None
+        Loss value, or `None`.
+
+    Returns
+    -------
+    str
+        The loss with six decimals, or `n/a`.
+    """
+    if loss is None:
+        return "n/a"
+
+    return f"{loss:.6f}"
+
+
 def build_step_summary(
     report: OverfittingReport,
     max_overfitting_ratio: float,
@@ -221,6 +275,9 @@ def build_step_summary(
             f"| Validation error (MSE) | {report.validation_loss:.6f} |",
             f"| Validation / train ratio | {report.overfitting_ratio:.3f} |",
             f"| Limit | {max_overfitting_ratio:.3f} |",
+            f"| Test error (MSE) | {format_optional_loss(report.test_loss)} |",
+            "| Naive baseline error (MSE) | "
+            f"{format_optional_loss(report.baseline_test_loss)} |",
             "",
         ]
     )
@@ -283,14 +340,20 @@ def main(
         report,
         arguments.max_overfitting_ratio,
     )
+    beats_baseline = is_better_than_baseline(report)
+    passed = is_within_limit and beats_baseline
 
     print(
         f"ticker={report.ticker} "
         f"train_loss={report.train_evaluation_loss:.6f} "
         f"validation_loss={report.validation_loss:.6f} "
+        f"test_loss={format_optional_loss(report.test_loss)} "
+        "baseline_test_loss="
+        f"{format_optional_loss(report.baseline_test_loss)} "
         f"overfitting_ratio={report.overfitting_ratio:.3f} "
         f"max_overfitting_ratio={arguments.max_overfitting_ratio:.3f} "
-        f"passed={is_within_limit}"
+        f"beats_baseline={beats_baseline} "
+        f"passed={passed}"
     )
 
     summary_path = os.getenv("GITHUB_STEP_SUMMARY")
@@ -298,12 +361,12 @@ def main(
         summary_markdown = build_step_summary(
             report,
             arguments.max_overfitting_ratio,
-            is_within_limit,
+            passed,
         )
         with Path(summary_path).open("a", encoding="utf-8") as summary_file:
             summary_file.write(summary_markdown)
 
-    return is_within_limit
+    return passed
 
 
 if __name__ == "__main__":

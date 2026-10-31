@@ -145,10 +145,11 @@ def test_prepare_data_reuses_stored_log_returns(
 def test_prepare_data_uses_the_stored_split_column(
     mock_fetch_price_series, tmp_path
 ) -> None:
-    """Check that the train rows of the split column set the training size."""
+    """Check that the split column sets the train, validation and test sets."""
     price_data = add_split_column(
         add_log_return_column(_make_price_frame(101)),
         train_split_ratio=0.5,
+        validation_split_ratio=0.25,
     )
     trainer = AutoencoderTrainer(
         ticker="PETR4.SA",
@@ -161,7 +162,9 @@ def test_prepare_data_uses_the_stored_split_column(
 
     mock_fetch_price_series.assert_not_called()
     assert len(prepared_data.train_dataset) == 46
-    assert len(prepared_data.validation_dataset) == 46
+    assert len(prepared_data.validation_dataset) == 21
+    assert len(prepared_data.test_dataset) == 21
+    assert len(prepared_data.full_dataset) == 96
 
 
 @patch(FETCH_PRICE_SERIES_PATH)

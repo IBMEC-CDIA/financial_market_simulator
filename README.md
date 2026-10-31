@@ -188,7 +188,7 @@ Options:
 |---|---|---|
 | `--ticker` | required | Ticker symbol, for example `AAPL` or `PETR4.SA`. |
 | `--start-date`, `--end-date` | `2020-01-01`, `2026-09-15` | Historical range (`YYYY-MM-DD`). |
-| `--train-split-ratio` | `0.8` | Fraction of the log-returns used for training, in time order. |
+| `--train-split-ratio` | `0.7` | Fraction of the log-returns used for training, in time order. |
 | `--window-size` | `10` | Number of log-returns in each window. |
 | `--batch-size` | `32` | Windows per training batch. |
 | `--hidden-layer-size`, `--latent-layer-size` | `16`, `4` | Sizes of the autoencoder layers. |
@@ -230,10 +230,16 @@ The workflow defined in
 - on every new commit pushed to an open pull request,
 - and when a pull request is merged into `main`.
 
-The workflow runs four checks in parallel: lint with pylint (`lint`), the
-security scan (`security`), the unit tests (`unit-tests`) and the end-to-end
-tests (`end-to-end-tests`). The `collect-data` job only starts when all four
-pass.
+The pipeline starts with `structure`, which checks the project layout:
+the required files (`pyproject.toml`, `uv.lock`, `README.md`,
+`requirements.txt`, `CLAUDE.md`, `Dockerfile`, `.gitignore`,
+`.dockerignore`, `.trivyignore`), that the `tests` folder exists, that
+`.env` is ignored by git and Docker and never tracked, that the Dockerfile
+installs from `uv.lock`, and that `uv.lock` matches `pyproject.toml`.
+Then `lint` runs pylint. Only after `lint` passes do `unit-tests`,
+`end-to-end-tests` and `security` run, in parallel. `test-report` writes a
+summary of the results to the job summary page. The `collect-data` job
+starts only when every check before it passes.
 
 Quality and security checks in the workflow:
 
@@ -244,6 +250,8 @@ Quality and security checks in the workflow:
   `pip-audit` (Windows-only pins are left out, because CI runs on Linux),
   scans the source code with Bandit at medium severity and above, and scans
   the git history for committed secrets with Gitleaks.
+- `test-report` ("Test report") runs after the tests and writes the job
+  results, the number of unit tests and the line coverage to the summary.
 - `pipeline-success` ("Pipeline Run Successfully") runs last. It fails when
   any job did not succeed. On pull requests, the jobs that only run on push
   are allowed to be skipped.
@@ -265,19 +273,27 @@ and its dependencies pass
 where the ticker is chosen, default `AAPL`):
 
 1. `collect-data` downloads the daily prices of the ticker with
-   `generative_models.data.collect_market_data` and saves a CSV file with
-   the `close_price`, `log_return` and `split` columns. The `split` column
-   marks the first 80% of the log-returns as `train` and the rest as
-   `validation`, in chronological order. The file is uploaded as the
-   `market-data-<ticker>` artifact.
+   `generative_models.data.collect_market_data`. Before anything is saved,
+   the prices are checked with Great Expectations
+   (`generative_models.data.validation`): enough rows, no missing or
+   non-positive prices, unique and increasing dates, and no daily log-return
+   above 0.5 in absolute value. Invalid data stops the job. Then it saves a
+   CSV file with the `close_price`, `log_return` and `split` columns. The
+   `split` column marks the first 70% of the log-returns as `train`, the next
+   15% as `validation` and the last 15% as `test`, in chronological order.
+   The file is uploaded as the `market-data-<ticker>` artifact.
 2. `train` downloads that artifact and trains the autoencoder with
-   `--price-data-path`, using the `split` column. After training it
-   computes the error on both splits and writes an overfitting report
-   (`*-overfitting.json`). It uploads the `.pt` weights and the report as
-   the `autoencoder-model-<ticker>` artifact.
-3. `evaluate` runs after `train`. It reads the report and fails when the
-   validation to training error ratio is above 1.5, which means the model
-   reconstructs the training data much better than unseen data.
+   `--price-data-path`, using the `split` column. The validation split is
+   used during training to monitor it. After training, the model is
+   evaluated once on the test split, together with a naive baseline that
+   always predicts zero. The overfitting report (`*-overfitting.json`)
+   contains the training, validation and test errors and the baseline error.
+   It uploads the `.pt` weights and the report as the
+   `autoencoder-model-<ticker>` artifact.
+3. `evaluate` runs after `train`. It reads the report and fails unless both
+   conditions hold: the validation to training error ratio is at most 1.5
+   (no strong overfitting), and the test error is smaller than the baseline
+   error (the model learned something the naive prediction does not).
 
 To run the same steps locally, the end-to-end test simulates the prices,
 so it does not need network access or a wandb key:

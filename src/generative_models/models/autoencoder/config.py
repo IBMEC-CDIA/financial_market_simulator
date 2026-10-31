@@ -15,7 +15,12 @@ class MarketDataConfig:
         Last date of the historical range, in `"YYYY-MM-DD"` format.
     train_split_ratio : float
         Fraction of the log-returns, in chronological order, used for
-        training. The remaining values are used for validation.
+        training.
+    validation_split_ratio : float
+        Fraction of the log-returns, right after the training ones, used
+        to monitor training. The remaining log-returns, at the end of the
+        series, form the held-out test set that is only evaluated after
+        training.
     window_size : int
         Number of consecutive log-returns in each training window.
     batch_size : int
@@ -24,7 +29,8 @@ class MarketDataConfig:
 
     start_date: str = "2020-01-01"
     end_date: str = "2026-09-15"
-    train_split_ratio: float = 0.8
+    train_split_ratio: float = 0.7
+    validation_split_ratio: float = 0.15
     window_size: int = 10
     batch_size: int = 32
 

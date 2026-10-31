@@ -9,6 +9,7 @@ from generative_models.data.market_data import (
     fetch_price_series,
     save_price_series,
 )
+from generative_models.data.validation import validate_price_dataset
 from generative_models.models.autoencoder.config import MarketDataConfig
 
 
@@ -82,15 +83,16 @@ def main(
     arguments = parser.parse_args(command_line_arguments)
 
     market_data_config = MarketDataConfig()
+    raw_prices = fetch_price_series(
+        arguments.ticker,
+        market_data_config.start_date,
+        market_data_config.end_date,
+    )
+    validate_price_dataset(raw_prices)
     price_data = add_split_column(
-        add_log_return_column(
-            fetch_price_series(
-                arguments.ticker,
-                market_data_config.start_date,
-                market_data_config.end_date,
-            )
-        ),
+        add_log_return_column(raw_prices),
         market_data_config.train_split_ratio,
+        market_data_config.validation_split_ratio,
     )
     output_path = save_price_series(price_data, arguments.output_path)
 

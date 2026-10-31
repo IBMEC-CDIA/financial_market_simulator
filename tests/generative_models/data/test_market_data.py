@@ -56,29 +56,55 @@ def test_add_log_return_column_matches_compute_log_return_values() -> None:
     )
 
 
-def test_add_split_column_marks_first_returns_as_train() -> None:
+def test_add_split_column_marks_train_validation_and_test() -> None:
     """Check the chronological split and that the first row stays empty."""
-    price_data = pd.DataFrame({"close_price": [100.0, 101.0, 102.0, 103.0]})
+    price_data = pd.DataFrame(
+        {"close_price": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]}
+    )
     dataset = add_log_return_column(price_data)
 
-    split_dataset = add_split_column(dataset, train_split_ratio=0.5)
+    split_dataset = add_split_column(
+        dataset,
+        train_split_ratio=0.4,
+        validation_split_ratio=0.2,
+    )
 
     assert list(split_dataset["split"].iloc[1:]) == [
         "train",
+        "train",
         "validation",
-        "validation",
+        "test",
+        "test",
     ]
     assert pd.isna(split_dataset["split"].iloc[0])
 
 
-def test_add_split_column_rejects_invalid_ratio() -> None:
-    """Check that a ratio of 1 or more is rejected."""
+def test_add_split_column_rejects_non_positive_ratio() -> None:
+    """Check that a ratio of zero or less is rejected."""
     dataset = add_log_return_column(
         pd.DataFrame({"close_price": [100.0, 101.0]})
     )
 
-    with pytest.raises(ValueError, match="train_split_ratio"):
-        add_split_column(dataset, train_split_ratio=1.0)
+    with pytest.raises(ValueError, match="greater than 0"):
+        add_split_column(
+            dataset,
+            train_split_ratio=0.0,
+            validation_split_ratio=0.2,
+        )
+
+
+def test_add_split_column_rejects_ratios_that_leave_no_test_set() -> None:
+    """Check that train and validation ratios must leave a test set."""
+    dataset = add_log_return_column(
+        pd.DataFrame({"close_price": [100.0, 101.0]})
+    )
+
+    with pytest.raises(ValueError, match="less than 1"):
+        add_split_column(
+            dataset,
+            train_split_ratio=0.7,
+            validation_split_ratio=0.3,
+        )
 
 
 def test_save_and_load_price_series_round_trip(tmp_path) -> None:

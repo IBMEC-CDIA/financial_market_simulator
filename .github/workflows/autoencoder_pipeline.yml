@@ -30,8 +30,88 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  structure:
+    name: Project structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check required files and ignore rules
+        run: |
+          status=0
+          for required_file in \
+            pyproject.toml uv.lock README.md requirements.txt CLAUDE.md \
+            Dockerfile .gitignore .dockerignore .trivyignore \
+            .github/workflows/autoencoder_pipeline.yml \
+            .github/actions/setup-python-uv/action.yml
+          do
+            if [ -f "$required_file" ]; then
+              echo "ok: $required_file"
+            else
+              echo "missing file: $required_file"
+              status=1
+            fi
+          done
+
+          if [ -d tests ]; then
+            echo "ok: tests directory"
+          else
+            echo "missing: tests directory"
+            status=1
+          fi
+
+          for ignore_file in .gitignore .dockerignore; do
+            if grep -qx ".env" "$ignore_file"; then
+              echo "ok: $ignore_file excludes .env"
+            else
+              echo "missing rule: $ignore_file must exclude .env"
+              status=1
+            fi
+          done
+
+          if [ -n "$(git ls-files .env)" ]; then
+            echo "error: .env is tracked by git"
+            status=1
+          fi
+
+          if grep -q "uv sync --frozen" Dockerfile; then
+            echo "ok: Dockerfile installs from uv.lock"
+          else
+            echo "missing: Dockerfile must install with uv sync --frozen"
+            status=1
+          fi
+
+          exit "$status"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.12.10"
+
+      - name: Check that uv.lock matches pyproject.toml
+        run: uv lock --check
+
+  lint:
+    name: Lint
+    needs: structure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Run pylint
+        run: uv run pylint src/generative_models tests
+
   unit-tests:
     name: Unit tests
+    needs: lint
     runs-on: ubuntu-latest
 
     steps:
@@ -61,22 +141,9 @@ jobs:
             coverage.xml
           if-no-files-found: ignore
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python and uv
-        uses: ./.github/actions/setup-python-uv
-
-      - name: Run pylint
-        run: uv run pylint src/generative_models tests
-
   security:
     name: Security scan
+    needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -110,6 +177,7 @@ jobs:
 
   end-to-end-tests:
     name: End-to-end tests
+    needs: lint
     runs-on: ubuntu-latest
 
     steps:
@@ -122,13 +190,61 @@ jobs:
       - name: Run end-to-end tests
         run: uv run pytest tests/end_to_end
 
+  test-report:
+    name: Test report
+    needs:
+      - lint
+      - unit-tests
+      - end-to-end-tests
+      - security
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
+
+    steps:
+      - name: Download test and coverage reports
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: unit-test-reports
+
+      - name: Write the test report to the job summary
+        run: |
+          {
+            echo "## Test report"
+            echo ""
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            printf '%s' "$NEEDS_JSON" | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+            echo ""
+            if [ -f junit-unit.xml ]; then
+              suite=$(grep -o '<testsuite [^>]*' junit-unit.xml | head -1)
+              tests=$(printf '%s' "$suite" | grep -o 'tests="[0-9]*"' | cut -d'"' -f2)
+              failures=$(printf '%s' "$suite" | grep -o 'failures="[0-9]*"' | cut -d'"' -f2)
+              errors=$(printf '%s' "$suite" | grep -o 'errors="[0-9]*"' | cut -d'"' -f2)
+              echo "Unit tests: $tests run, $failures failed, $errors errors."
+            else
+              echo "Unit tests: no JUnit report was produced."
+            fi
+            if [ -f coverage.xml ]; then
+              rate=$(grep -o 'line-rate="[0-9.]*"' coverage.xml | head -1 | cut -d'"' -f2)
+              echo "Line coverage of src/generative_models: $(awk -v r="$rate" 'BEGIN { printf "%.2f%%", r * 100 }')"
+            else
+              echo "Line coverage: no coverage report was produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   collect-data:
     name: Collect market data
     needs:
+      - structure
       - lint
-      - security
       - unit-tests
       - end-to-end-tests
+      - security
     if: >
       github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch'
@@ -320,10 +436,12 @@ jobs:
     name: Pipeline Run Successfully
     if: always()
     needs:
+      - structure
       - lint
-      - security
       - unit-tests
       - end-to-end-tests
+      - security
+      - test-report
       - collect-data
       - train
       - evaluate

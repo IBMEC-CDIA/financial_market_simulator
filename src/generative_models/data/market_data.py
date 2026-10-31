@@ -84,20 +84,26 @@ def add_log_return_column(
 def add_split_column(
     dataset: pd.DataFrame,
     train_split_ratio: float,
+    validation_split_ratio: float,
 ) -> pd.DataFrame:
-    """Add a `"split"` column marking each log-return as train or validation.
+    """Add a `"split"` column marking each log-return as train, val or test.
 
-    The log-returns are split in chronological order: the first
-    `train_split_ratio` share is `"train"` and the rest is `"validation"`.
-    Rows without a log-return, such as the first row, stay empty.
+    The log-returns are split in chronological order. The first
+    `train_split_ratio` share is `"train"`, the next
+    `validation_split_ratio` share is `"validation"`, and the remaining
+    log-returns are `"test"`. Rows without a log-return, such as the first
+    row, stay empty.
 
     Parameters
     ----------
     dataset : pd.DataFrame
         Data frame with a `"log_return"` column.
     train_split_ratio : float
-        Fraction of the log-returns, in chronological order, marked as
-        `"train"`. It must be between 0 and 1, exclusive.
+        Fraction of the log-returns marked as `"train"`.
+    validation_split_ratio : float
+        Fraction of the log-returns marked as `"validation"`. The two ratios
+        must be positive and their sum must be below 1, so that the test
+        set is not empty.
 
     Returns
     -------
@@ -107,25 +113,40 @@ def add_split_column(
     Raises
     ------
     ValueError
-        If `train_split_ratio` is not between 0 and 1, exclusive.
+        If a ratio is not positive, or if the ratios leave no log-returns
+        for the test set.
 
     Example
     -------
-    >>> dataset = add_split_column(dataset, train_split_ratio=0.8)
-    >>> dataset["split"].dropna().value_counts()["train"]
-    4
+    >>> dataset = add_split_column(
+    ...     dataset,
+    ...     train_split_ratio=0.7,
+    ...     validation_split_ratio=0.15,
+    ... )
+    >>> dataset["split"].dropna().value_counts()["test"]
+    1
     """
-    if not 0 < train_split_ratio < 1:
-        raise ValueError("train_split_ratio must be between 0 and 1.")
+    if train_split_ratio <= 0 or validation_split_ratio <= 0:
+        raise ValueError("The split ratios must be greater than 0.")
+    if train_split_ratio + validation_split_ratio >= 1:
+        raise ValueError(
+            "train_split_ratio and validation_split_ratio must add up to "
+            "less than 1, so that the test set is not empty."
+        )
 
     labeled_dataset = dataset.copy()
     has_return = labeled_dataset["log_return"].notna()
     return_count = int(has_return.sum())
     train_count = int(return_count * train_split_ratio)
-    split_labels = np.where(
-        np.arange(return_count) < train_count,
-        "train",
-        "validation",
+    validation_count = int(return_count * validation_split_ratio)
+    positions = np.arange(return_count)
+    split_labels = np.select(
+        [
+            positions < train_count,
+            positions < train_count + validation_count,
+        ],
+        ["train", "validation"],
+        default="test",
     )
     labeled_dataset["split"] = pd.Series(
         None,

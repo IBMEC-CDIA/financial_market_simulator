@@ -47,6 +47,9 @@ class PreparedAutoencoderData:
         Mean of the training log-returns.
     return_train_std : float
         Standard deviation of the training log-returns.
+    test_dataset : SlidingWindowReconstructionDataset | None
+        Windows of the held-out test log-returns, normalized with the
+        training statistics. It is `None` when there is no test split.
     """
 
     train_dataset: SlidingWindowReconstructionDataset
@@ -54,6 +57,7 @@ class PreparedAutoencoderData:
     full_dataset: SlidingWindowReconstructionDataset
     return_train_mean: float
     return_train_std: float
+    test_dataset: SlidingWindowReconstructionDataset | None = None
 
 
 @dataclass
@@ -84,6 +88,12 @@ class AutoencoderTrainingResult:
         normalization.
     model_file_path : Path
         Local file where the trained `state_dict` was saved.
+    test_loss : float | None
+        Mean squared reconstruction error of the held-out test set. It is
+        `None` when there is no test split.
+    baseline_test_loss : float | None
+        Error of the naive zero prediction on the test set. The model
+        should have a smaller `test_loss` than this value.
     """
 
     model: SimpleAutoencoder
@@ -94,6 +104,8 @@ class AutoencoderTrainingResult:
     return_train_mean: float
     return_train_std: float
     model_file_path: Path
+    test_loss: float | None = None
+    baseline_test_loss: float | None = None
 
 
 def compute_reconstruction_scores(
@@ -131,6 +143,79 @@ def compute_reconstruction_scores(
         window_score_tensor = squared_error_tensor.mean(dim=1)
 
     return window_score_tensor.cpu().numpy()
+
+
+def _build_test_dataset(
+    test_return_tensor: torch.Tensor,
+    return_train_mean: float,
+    return_train_std: float,
+    window_size: int,
+) -> SlidingWindowReconstructionDataset | None:
+    """Normalize the test log-returns and build their windows.
+
+    Parameters
+    ----------
+    test_return_tensor : torch.Tensor
+        Log-returns of the test split, in chronological order. It may be
+        empty.
+    return_train_mean : float
+        Mean of the training log-returns, used for normalization.
+    return_train_std : float
+        Standard deviation of the training log-returns, used for
+        normalization.
+    window_size : int
+        Number of log-returns in each window.
+
+    Returns
+    -------
+    SlidingWindowReconstructionDataset | None
+        Windows of the normalized test log-returns, or `None` when the
+        test split is empty.
+    """
+    if len(test_return_tensor) == 0:
+        return None
+
+    normalized_test_tensor, _, _ = normalize_series(
+        test_return_tensor,
+        mean=return_train_mean,
+        std=return_train_std,
+    )
+
+    return SlidingWindowReconstructionDataset(
+        series_values=normalized_test_tensor,
+        window_size=window_size,
+    )
+
+
+def compute_mean_baseline_loss(
+    dataset: SlidingWindowReconstructionDataset,
+) -> float:
+    """Compute the error of a naive model that always predicts zero.
+
+    The series is normalized with the training statistics, so zero is the
+    training mean. A useful autoencoder must reconstruct the windows with
+    a smaller mean squared error than this baseline.
+
+    Parameters
+    ----------
+    dataset : SlidingWindowReconstructionDataset
+        Normalized windows to evaluate.
+
+    Returns
+    -------
+    float
+        Mean of the squared values over all windows.
+
+    Example
+    -------
+    >>> compute_mean_baseline_loss(prepared_data.test_dataset)
+    0.98
+    """
+    windows = torch.stack(
+        [dataset[index] for index in range(len(dataset))]
+    )
+
+    return float((windows**2).mean().item())
 
 
 def build_ticker_slug(ticker: str) -> str:
@@ -245,16 +330,18 @@ class AutoencoderTrainer:
 
         return output_directory / f"{self.model_name}.pt"
 
-    def _count_training_returns(
+    def _count_split_sizes(
         self,
         price_data: pd.DataFrame,
         return_count: int,
-    ) -> int:
-        """Return how many of the first log-returns are used for training.
+    ) -> tuple[int, int]:
+        """Return the number of training and validation log-returns.
 
         When the data frame has a `"split"` column, as the files of
-        `collect_market_data` do, the rows marked `"train"` are counted.
-        Otherwise the `train_split_ratio` of the configuration is applied.
+        `collect_market_data` do, the rows marked `"train"` and
+        `"validation"` are counted. The log-returns after them are the test
+        set. Otherwise the `train_split_ratio` of the configuration is
+        applied, and all the remaining log-returns are validation.
 
         Parameters
         ----------
@@ -265,18 +352,23 @@ class AutoencoderTrainer:
 
         Returns
         -------
-        int
-            Number of log-returns at the start of the series that belong
-            to the training split.
+        tuple[int, int]
+            Number of log-returns for training and for validation. They
+            are taken from the start of the series, in this order.
         """
         if "split" in price_data.columns:
             split_values = price_data["split"].dropna()
 
-            return int((split_values == "train").sum())
+            return (
+                int((split_values == "train").sum()),
+                int((split_values == "validation").sum()),
+            )
 
-        train_split_ratio = self.config.market_data.train_split_ratio
+        train_size = int(
+            return_count * self.config.market_data.train_split_ratio
+        )
 
-        return int(return_count * train_split_ratio)
+        return train_size, return_count - train_size
 
     def _build_log_return_tensor(
         self,
@@ -331,24 +423,26 @@ class AutoencoderTrainer:
             If the training or the validation split has fewer values
             than `window_size`.
         """
-        market_data_config = self.config.market_data
         if self.price_data is None:
             price_data = fetch_price_series(
                 self.ticker,
-                market_data_config.start_date,
-                market_data_config.end_date,
+                self.config.market_data.start_date,
+                self.config.market_data.end_date,
             )
         else:
             price_data = self.price_data
         log_return_tensor = self._build_log_return_tensor(price_data)
 
-        train_size = self._count_training_returns(
+        train_size, validation_size = self._count_split_sizes(
             price_data,
             len(log_return_tensor),
         )
         train_return_tensor = log_return_tensor[:train_size]
-        validation_return_tensor = log_return_tensor[train_size:]
-        window_size = market_data_config.window_size
+        validation_return_tensor = log_return_tensor[
+            train_size : train_size + validation_size
+        ]
+        test_return_tensor = log_return_tensor[train_size + validation_size :]
+        window_size = self.config.market_data.window_size
         if (
             len(train_return_tensor) < window_size
             or len(validation_return_tensor) < window_size
@@ -357,6 +451,11 @@ class AutoencoderTrainer:
                 f"Not enough data for ticker '{self.ticker}': the "
                 "training and validation splits need at least "
                 f"{window_size} log-returns each."
+            )
+        if 0 < len(test_return_tensor) < window_size:
+            raise ValueError(
+                f"Not enough data for ticker '{self.ticker}': the test "
+                f"split needs at least {window_size} log-returns."
             )
 
         normalized_train_tensor, return_train_mean, return_train_std = (
@@ -371,6 +470,12 @@ class AutoencoderTrainer:
             log_return_tensor,
             mean=return_train_mean,
             std=return_train_std,
+        )
+        test_dataset = _build_test_dataset(
+            test_return_tensor,
+            return_train_mean,
+            return_train_std,
+            window_size,
         )
 
         return PreparedAutoencoderData(
@@ -388,6 +493,7 @@ class AutoencoderTrainer:
             ),
             return_train_mean=return_train_mean,
             return_train_std=return_train_std,
+            test_dataset=test_dataset,
         )
 
     def build_model(self) -> SimpleAutoencoder:
@@ -438,6 +544,10 @@ class AutoencoderTrainer:
                 model,
                 prepared_data.validation_dataset,
             )
+            test_loss, baseline_test_loss = self._evaluate_test_split(
+                model,
+                prepared_data,
+            )
             self.experiment_tracker.log_metrics(
                 {
                     "train/loss_mse": train_evaluation_loss,
@@ -478,7 +588,39 @@ class AutoencoderTrainer:
             return_train_mean=prepared_data.return_train_mean,
             return_train_std=prepared_data.return_train_std,
             model_file_path=self.model_file_path,
+            test_loss=test_loss,
+            baseline_test_loss=baseline_test_loss,
         )
+
+    def _evaluate_test_split(
+        self,
+        model: nn.Module,
+        prepared_data: PreparedAutoencoderData,
+    ) -> tuple[float | None, float | None]:
+        """Compute the test error of the model and of the naive baseline.
+
+        Parameters
+        ----------
+        model : nn.Module
+            Trained autoencoder.
+        prepared_data : PreparedAutoencoderData
+            Data prepared by `prepare_data`, which may hold a test set.
+
+        Returns
+        -------
+        tuple[float | None, float | None]
+            Test error of the model and error of the naive zero prediction.
+            Both are `None` when the data has no test set.
+        """
+        if prepared_data.test_dataset is None:
+            return None, None
+
+        test_loss = self._evaluate(model, prepared_data.test_dataset)
+        baseline_test_loss = compute_mean_baseline_loss(
+            prepared_data.test_dataset
+        )
+
+        return test_loss, baseline_test_loss
 
     def _resolve_device(self) -> str:
         """Return the configured device, or pick one automatically.

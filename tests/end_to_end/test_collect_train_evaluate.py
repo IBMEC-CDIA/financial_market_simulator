@@ -24,7 +24,8 @@ from generative_models.models.autoencoder.train_autoencoder import (
 
 FETCH_PATH = "generative_models.data.collect_market_data.fetch_price_series"
 NUMBER_OF_PRICES = 400
-TRAIN_SPLIT_RATIO = 0.8
+TRAIN_SPLIT_RATIO = 0.7
+VALIDATION_SPLIT_RATIO = 0.15
 
 
 def _make_fetched_prices() -> pd.DataFrame:
@@ -65,10 +66,13 @@ def test_collect_train_and_evaluate_run_end_to_end(
     expected_columns = {"close_price", "log_return", "split"}
     assert expected_columns <= set(collected_data.columns)
     split_counts = collected_data["split"].value_counts()
-    expected_train_count = int((NUMBER_OF_PRICES - 1) * TRAIN_SPLIT_RATIO)
+    return_count = NUMBER_OF_PRICES - 1
+    expected_train_count = int(return_count * TRAIN_SPLIT_RATIO)
+    expected_validation_count = int(return_count * VALIDATION_SPLIT_RATIO)
     assert split_counts["train"] == expected_train_count
-    assert split_counts["validation"] == (
-        NUMBER_OF_PRICES - 1 - expected_train_count
+    assert split_counts["validation"] == expected_validation_count
+    assert split_counts["test"] == (
+        return_count - expected_train_count - expected_validation_count
     )
 
     train_main(
@@ -94,9 +98,11 @@ def test_collect_train_and_evaluate_run_end_to_end(
     assert report.ticker == "AAPL"
     assert report.overfitting_ratio > 0
 
+    assert report.test_loss is not None
+    assert report.baseline_test_loss is not None
+    assert evaluate_main(
+        ["--report-path", str(report_path), "--max-overfitting-ratio", "0"]
+    ) is False
     assert evaluate_main(
         ["--report-path", str(report_path), "--max-overfitting-ratio", "1e9"]
-    )
-    assert not evaluate_main(
-        ["--report-path", str(report_path), "--max-overfitting-ratio", "0"]
-    )
+    ) is (report.test_loss < report.baseline_test_loss)

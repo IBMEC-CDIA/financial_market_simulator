@@ -16,12 +16,26 @@ FETCH_PATH = (
 )
 
 
+FETCHED_ROW_COUNT = 300
+
+
 def _make_fetched_prices() -> pd.DataFrame:
-    """Build a small price frame in the format returned by yfinance."""
-    return pd.DataFrame(
-        {"close_price": [100.0, 110.0, 99.0]},
-        index=pd.to_datetime(["2026-01-02", "2026-01-05", "2026-01-06"]),
+    """Build a price frame in the format returned by yfinance.
+
+    The frame has enough rows and small daily moves to pass the quality
+    checks of the collection step.
+    """
+    rng = np.random.default_rng(7)
+    price_values = 100 * np.exp(
+        np.cumsum(rng.normal(0.0, 0.01, FETCHED_ROW_COUNT))
     )
+    index = pd.bdate_range(
+        "2020-01-01",
+        periods=FETCHED_ROW_COUNT,
+        name="Date",
+    )
+
+    return pd.DataFrame({"close_price": price_values}, index=index)
 
 
 def test_missing_output_path_raises_system_exit() -> None:
@@ -54,7 +68,7 @@ def test_main_saves_prices_with_log_returns(mock_fetch, tmp_path) -> None:
         "log_return",
         "split",
     ]
-    assert len(saved_data) == 3
+    assert len(saved_data) == FETCHED_ROW_COUNT
     assert np.isnan(saved_data["log_return"].iloc[0])
     assert np.isnan(saved_data["split"].iloc[0])
 
