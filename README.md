@@ -230,18 +230,23 @@ The workflow defined in
 - on every new commit pushed to an open pull request,
 - and when a pull request is merged into `main`.
 
-The workflow runs the unit tests (`unit-tests`, with pylint) and the
-end-to-end tests (`end-to-end-tests`) in parallel. The `collect-data` job
-only starts when both of them pass.
+The workflow runs four checks in parallel: lint with pylint (`lint`), the
+security scan (`security`), the unit tests (`unit-tests`) and the end-to-end
+tests (`end-to-end-tests`). The `collect-data` job only starts when all four
+pass.
 
 Quality and security checks in the workflow:
 
-- `unit-tests` runs pylint and the unit tests. It fails when the coverage
+- `unit-tests` runs the unit tests. It fails when the coverage
   of `src/generative_models` is below 90%, and it uploads the JUnit and
   coverage XML reports as the `unit-test-reports` artifact.
-- `unit-tests` also audits the runtime dependencies locked in `uv.lock`
-  with `pip-audit`. Windows-only pins are left out, because CI runs on
-  Linux. The job fails when a locked version has a known vulnerability.
+- `security` audits the runtime dependencies locked in `uv.lock` with
+  `pip-audit` (Windows-only pins are left out, because CI runs on Linux),
+  scans the source code with Bandit at medium severity and above, and scans
+  the git history for committed secrets with Gitleaks.
+- `pipeline-success` ("Pipeline Run Successfully") runs last. It fails when
+  any job did not succeed. On pull requests, the jobs that only run on push
+  are allowed to be skipped.
 - `build-image` scans the image with Trivy and fails on `CRITICAL` or `HIGH`
   vulnerabilities that have a fix available. The list is written to the
   job summary, before the image is saved or pushed.

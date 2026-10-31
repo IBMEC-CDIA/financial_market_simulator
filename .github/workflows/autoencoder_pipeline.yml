@@ -31,7 +31,38 @@ concurrency:
 
 jobs:
   unit-tests:
-    name: Unit tests and lint
+    name: Unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Run unit tests with coverage
+        run: >
+          uv run pytest
+          --ignore=tests/end_to_end
+          --cov=generative_models
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=90
+          --junitxml=junit-unit.xml
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            junit-unit.xml
+            coverage.xml
+          if-no-files-found: ignore
+
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
 
     steps:
@@ -44,17 +75,24 @@ jobs:
       - name: Run pylint
         run: uv run pylint src/generative_models tests
 
-      - name: Run unit tests with coverage
-        run: >
-          uv run pytest
-          --ignore=tests/end_to_end
-          --cov=generative_models
-          --cov-report=term-missing
-          --cov-report=xml
-          --cov-fail-under=90
-          --junitxml=junit-unit.xml
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
-      - name: Audit runtime dependencies
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Scan source code with Bandit
+        run: uvx bandit==1.9.4 --recursive src/generative_models --severity-level medium
+
+      - name: Audit runtime dependencies with pip-audit
         run: |
           uv export --frozen --no-dev --no-hashes --no-emit-project \
             --output-file requirements-lock.txt
@@ -62,15 +100,13 @@ jobs:
             | sed -E 's/\+cu[0-9]+//' > requirements-audit.txt
           uvx pip-audit --disable-pip --no-deps --requirement requirements-audit.txt
 
-      - name: Upload test and coverage reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-reports
-          path: |
-            junit-unit.xml
-            coverage.xml
-          if-no-files-found: ignore
+      - name: Scan git history for secrets with Gitleaks
+        run: >
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/repo"
+          -w /repo
+          ghcr.io/gitleaks/gitleaks:v8.30.1
+          git --redact --no-banner --exit-code 1 .
 
   end-to-end-tests:
     name: End-to-end tests
@@ -89,6 +125,8 @@ jobs:
   collect-data:
     name: Collect market data
     needs:
+      - lint
+      - security
       - unit-tests
       - end-to-end-tests
     if: >
@@ -277,3 +315,47 @@ jobs:
           docker tag "$IMAGE_NAME:$GITHUB_SHA" "$IMAGE_NAME:latest"
           docker push "$IMAGE_NAME:latest"
           docker push "$IMAGE_NAME:$GITHUB_SHA"
+
+  pipeline-success:
+    name: Pipeline Run Successfully
+    if: always()
+    needs:
+      - lint
+      - security
+      - unit-tests
+      - end-to-end-tests
+      - collect-data
+      - train
+      - evaluate
+      - build-image
+      - push-image
+    runs-on: ubuntu-latest
+
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      NEEDS_JSON: ${{ toJSON(needs) }}
+      PUSH_ONLY_JOBS: '["collect-data","train","evaluate","build-image","push-image"]'
+
+    steps:
+      - name: Check that every job succeeded
+        run: |
+          FAILED_JOBS=$(printf '%s' "$NEEDS_JSON" | jq -r \
+            --arg event "$EVENT_NAME" \
+            --argjson pushOnly "$PUSH_ONLY_JOBS" '
+            to_entries[]
+            | . as $entry
+            | select(
+                $entry.value.result != "success"
+                and (
+                  $entry.value.result != "skipped"
+                  or $event != "pull_request"
+                  or ($pushOnly | any(. == $entry.key) | not)
+                )
+              )
+            | "\($entry.key): \($entry.value.result)"')
+          if [ -n "$FAILED_JOBS" ]; then
+            echo "Jobs that did not succeed:"
+            echo "$FAILED_JOBS"
+            exit 1
+          fi
+          echo "All jobs succeeded."
