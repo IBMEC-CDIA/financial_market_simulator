@@ -242,8 +242,8 @@ Quality and security checks in the workflow:
 - `unit-tests` also audits the runtime dependencies locked in `uv.lock`
   with `pip-audit`. Windows-only pins are left out, because CI runs on
   Linux. The job fails when a locked version has a known vulnerability.
-- `build-image` scans the image with Trivy and fails on fixed `CRITICAL`
-  or `HIGH` vulnerabilities, before the image is saved or pushed.
+- `build-image` scans the image with Trivy and fails on `CRITICAL` or `HIGH`
+  vulnerabilities that have a fix available. The list is written to the job summary, before the image is saved or pushed.
 - `evaluate` writes the overfitting table to the job summary page.
 - Changes that only touch Markdown files, `specs/` or `docs/` do not start
   the pipeline.

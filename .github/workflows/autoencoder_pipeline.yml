@@ -216,9 +216,26 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/financial-market-simulator:${{ github.sha }}
+          scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          exit-code: "1"
+          format: json
+          output: trivy-report.json
+          exit-code: "0"
+
+      - name: Fail on fixable CRITICAL or HIGH vulnerabilities
+        run: |
+          FIXABLE_FILTER='[.Results[]?.Vulnerabilities[]? | select(.FixedVersion != null and .FixedVersion != "")]'
+          FIXABLE_COUNT=$(jq "$FIXABLE_FILTER | length" trivy-report.json)
+          {
+            echo "## Image vulnerabilities"
+            echo ""
+            echo "Fixable CRITICAL or HIGH vulnerabilities: $FIXABLE_COUNT"
+            echo ""
+            jq -r "$FIXABLE_FILTER | .[] | \"- \(.Severity) \(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)\"" trivy-report.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          jq -r "$FIXABLE_FILTER | .[] | \"\(.Severity) \(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)\"" trivy-report.json
+          test "$FIXABLE_COUNT" -eq 0
 
       - name: Save image to a file
         env:
