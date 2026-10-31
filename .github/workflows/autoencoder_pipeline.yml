@@ -1,0 +1,479 @@
+name: Autoencoder Pipeline
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - "**.md"
+      - "specs/**"
+      - "docs/**"
+  push:
+    branches:
+      - "**"
+    paths-ignore:
+      - "**.md"
+      - "specs/**"
+      - "docs/**"
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Ticker symbol to train on"
+        required: true
+        default: "AAPL"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autoencoder-pipeline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  structure:
+    name: Project structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check required files and ignore rules
+        run: |
+          status=0
+          for required_file in \
+            pyproject.toml uv.lock README.md requirements.txt CLAUDE.md \
+            Dockerfile .gitignore .dockerignore .trivyignore \
+            .github/workflows/autoencoder_pipeline.yml \
+            .github/actions/setup-python-uv/action.yml
+          do
+            if [ -f "$required_file" ]; then
+              echo "ok: $required_file"
+            else
+              echo "missing file: $required_file"
+              status=1
+            fi
+          done
+
+          if [ -d tests ]; then
+            echo "ok: tests directory"
+          else
+            echo "missing: tests directory"
+            status=1
+          fi
+
+          for ignore_file in .gitignore .dockerignore; do
+            if grep -qx ".env" "$ignore_file"; then
+              echo "ok: $ignore_file excludes .env"
+            else
+              echo "missing rule: $ignore_file must exclude .env"
+              status=1
+            fi
+          done
+
+          if [ -n "$(git ls-files .env)" ]; then
+            echo "error: .env is tracked by git"
+            status=1
+          fi
+
+          if grep -q "uv sync --frozen" Dockerfile; then
+            echo "ok: Dockerfile installs from uv.lock"
+          else
+            echo "missing: Dockerfile must install with uv sync --frozen"
+            status=1
+          fi
+
+          exit "$status"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.12.10"
+
+      - name: Check that uv.lock matches pyproject.toml
+        run: uv lock --check
+
+  lint:
+    name: Lint
+    needs: structure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Run pylint
+        run: uv run pylint src/generative_models tests
+
+  unit-tests:
+    name: Unit tests
+    needs: lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Run unit tests with coverage
+        run: >
+          uv run pytest
+          --ignore=tests/end_to_end
+          --cov=generative_models
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=90
+          --junitxml=junit-unit.xml
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            junit-unit.xml
+            coverage.xml
+          if-no-files-found: ignore
+
+  security:
+    name: Security scan
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Scan source code with Bandit
+        run: uvx bandit==1.9.4 --recursive src/generative_models --severity-level medium
+
+      - name: Audit runtime dependencies with pip-audit
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project \
+            --output-file requirements-lock.txt
+          grep -v "sys_platform == 'win32'" requirements-lock.txt \
+            | sed -E 's/\+cu[0-9]+//' > requirements-audit.txt
+          uvx pip-audit --disable-pip --no-deps --requirement requirements-audit.txt
+
+      - name: Scan git history for secrets with Gitleaks
+        run: >
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/repo"
+          -w /repo
+          ghcr.io/gitleaks/gitleaks:v8.30.1
+          git --redact --no-banner --exit-code 1 .
+
+  end-to-end-tests:
+    name: End-to-end tests
+    needs: lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Run end-to-end tests
+        run: uv run pytest tests/end_to_end
+
+  test-report:
+    name: Test report
+    needs:
+      - lint
+      - unit-tests
+      - end-to-end-tests
+      - security
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
+
+    steps:
+      - name: Download test and coverage reports
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: unit-test-reports
+
+      - name: Write the test report to the job summary
+        run: |
+          {
+            echo "## Test report"
+            echo ""
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            printf '%s' "$NEEDS_JSON" | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+            echo ""
+            if [ -f junit-unit.xml ]; then
+              suite=$(grep -o '<testsuite [^>]*' junit-unit.xml | head -1)
+              tests=$(printf '%s' "$suite" | grep -o 'tests="[0-9]*"' | cut -d'"' -f2)
+              failures=$(printf '%s' "$suite" | grep -o 'failures="[0-9]*"' | cut -d'"' -f2)
+              errors=$(printf '%s' "$suite" | grep -o 'errors="[0-9]*"' | cut -d'"' -f2)
+              echo "Unit tests: $tests run, $failures failed, $errors errors."
+            else
+              echo "Unit tests: no JUnit report was produced."
+            fi
+            if [ -f coverage.xml ]; then
+              rate=$(grep -o 'line-rate="[0-9.]*"' coverage.xml | head -1 | cut -d'"' -f2)
+              echo "Line coverage of src/generative_models: $(awk -v r="$rate" 'BEGIN { printf "%.2f%%", r * 100 }')"
+            else
+              echo "Line coverage: no coverage report was produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  collect-data:
+    name: Collect market data
+    needs:
+      - structure
+      - lint
+      - unit-tests
+      - end-to-end-tests
+      - security
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      TRAIN_TICKER: ${{ inputs.ticker || 'AAPL' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Collect the market prices
+        run: >
+          uv run python -m generative_models.data.collect_market_data
+          --ticker "$TRAIN_TICKER"
+          --output-path "market-data/$TRAIN_TICKER.csv"
+
+      - name: Upload market prices
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-data-${{ env.TRAIN_TICKER }}
+          path: market-data/*.csv
+          if-no-files-found: error
+
+  train:
+    name: Train autoencoder
+    needs: collect-data
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+      TRAIN_TICKER: ${{ inputs.ticker || 'AAPL' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Download market prices
+        uses: actions/download-artifact@v4
+        with:
+          name: market-data-${{ env.TRAIN_TICKER }}
+          path: market-data
+
+      - name: Train the autoencoder model
+        run: >
+          uv run python -m generative_models.models.autoencoder.train_autoencoder
+          --ticker "$TRAIN_TICKER"
+          --price-data-path "market-data/$TRAIN_TICKER.csv"
+          --device cpu
+          --output-directory artifacts
+
+      - name: Upload model weights and report
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoencoder-model-${{ env.TRAIN_TICKER }}
+          path: |
+            artifacts/*.pt
+            artifacts/*-overfitting.json
+          if-no-files-found: error
+
+  evaluate:
+    name: Evaluate overfitting
+    needs: train
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      TRAIN_TICKER: ${{ inputs.ticker || 'AAPL' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Download model weights and report
+        uses: actions/download-artifact@v4
+        with:
+          name: autoencoder-model-${{ env.TRAIN_TICKER }}
+          path: artifacts
+
+      - name: Check overfitting
+        run: >
+          uv run python -m generative_models.models.autoencoder.overfitting
+          --report-path artifacts/*-overfitting.json
+
+  build-image:
+    name: Build Docker image
+    needs: train
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/financial-market-simulator:${{ github.sha }}
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/financial-market-simulator:${{ github.sha }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: json
+          output: trivy-report.json
+          exit-code: "0"
+
+      - name: Fail on fixable CRITICAL or HIGH vulnerabilities
+        run: |
+          FIXABLE_LIST=$(jq -r '.Results[]? as $result | $result.Vulnerabilities[]? | select(.FixedVersion != null and .FixedVersion != "") | "\($result.Target) \(.Severity) \(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"' trivy-report.json)
+          FIXABLE_COUNT=$(printf '%s\n' "$FIXABLE_LIST" | grep -c . || true)
+          {
+            echo "## Image vulnerabilities"
+            echo ""
+            echo "Fixable CRITICAL or HIGH vulnerabilities: $FIXABLE_COUNT"
+            echo ""
+            printf '%s\n' "$FIXABLE_LIST" | sed '/^$/d; s/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$FIXABLE_LIST" | sed '/^$/d'
+          test "$FIXABLE_COUNT" -eq 0
+
+      - name: Save image to a file
+        env:
+          IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/financial-market-simulator
+        run: docker save -o financial-market-simulator.tar "$IMAGE_NAME:$GITHUB_SHA"
+
+      - name: Upload image file
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: financial-market-simulator.tar
+          if-no-files-found: error
+
+  push-image:
+    name: Push Docker image
+    needs: build-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download image file
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Load image
+        run: docker load -i financial-market-simulator.tar
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tag and push image to Docker Hub
+        env:
+          IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/financial-market-simulator
+        run: |
+          docker tag "$IMAGE_NAME:$GITHUB_SHA" "$IMAGE_NAME:latest"
+          docker push "$IMAGE_NAME:latest"
+          docker push "$IMAGE_NAME:$GITHUB_SHA"
+
+  pipeline-success:
+    name: Pipeline Run Successfully
+    if: always()
+    needs:
+      - structure
+      - lint
+      - unit-tests
+      - end-to-end-tests
+      - security
+      - test-report
+      - collect-data
+      - train
+      - evaluate
+      - build-image
+      - push-image
+    runs-on: ubuntu-latest
+
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      NEEDS_JSON: ${{ toJSON(needs) }}
+      PUSH_ONLY_JOBS: '["collect-data","train","evaluate","build-image","push-image"]'
+
+    steps:
+      - name: Check that every job succeeded
+        run: |
+          FAILED_JOBS=$(printf '%s' "$NEEDS_JSON" | jq -r \
+            --arg event "$EVENT_NAME" \
+            --argjson pushOnly "$PUSH_ONLY_JOBS" '
+            to_entries[]
+            | . as $entry
+            | select(
+                $entry.value.result != "success"
+                and (
+                  $entry.value.result != "skipped"
+                  or $event != "pull_request"
+                  or ($pushOnly | any(. == $entry.key) | not)
+                )
+              )
+            | "\($entry.key): \($entry.value.result)"')
+          if [ -n "$FAILED_JOBS" ]; then
+            echo "Jobs that did not succeed:"
+            echo "$FAILED_JOBS"
+            exit 1
+          fi
+          echo "All jobs succeeded."

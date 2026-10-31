@@ -20,7 +20,10 @@ financial_market_simulator/
 ├── .github/
 │   ├── copilot-instructions.md
 │   └── workflows/
-│       └── tests.yml
+│       └── autoencoder_pipeline.yml
+│
+├── Dockerfile                  # image that serves the FastAPI autoencoder API
+├── .dockerignore
 │
 ├── notebooks/                  # exploratory and teaching notebooks
 ├── specs/                      # module specs for students
@@ -124,20 +127,218 @@ the order of the tracks.
 Once both tracks are implemented, the project can be used with:
 
 ```bash
-uv run python -m generative_models.models.autoencoder.train_autoencoder     --ticker AAPL
 uv run python -m generative_models.serving.predict_autoencoder
 uv run uvicorn generative_models.serving.api:app --reload
+```
+
+### Example: training an autoencoder from the command line
+
+The training script trains the autoencoder of one ticker, logs the run
+to wandb and saves the weights in the output directory. Only `--ticker`
+is required; every other option defaults to the values of the
+configuration dataclasses in
+`src/generative_models/models/autoencoder/config.py`.
+
+Quick run with a short history and two epochs (PowerShell):
+
+```powershell
+uv run python -m generative_models.models.autoencoder.train_autoencoder `
+    --ticker AAPL `
+    --start-date 2024-01-01 `
+    --end-date 2024-12-31 `
+    --window-size 10 `
+    --batch-size 16 `
+    --epochs 2 `
+    --device cpu
+```
+
+The same run in bash:
+
+```bash
+uv run python -m generative_models.models.autoencoder.train_autoencoder \
+    --ticker AAPL \
+    --start-date 2024-01-01 \
+    --end-date 2024-12-31 \
+    --window-size 10 \
+    --batch-size 16 \
+    --epochs 2 \
+    --device cpu
+```
+
+A complete run with the default settings (300 epochs, window of 10
+log-returns) and the wandb project and output directory set explicitly:
+
+```bash
+uv run python -m generative_models.models.autoencoder.train_autoencoder \
+    --ticker PETR4.SA \
+    --start-date 2020-01-01 \
+    --end-date 2026-09-15 \
+    --epochs 300 \
+    --learning-rate 0.001 \
+    --random-seed 42 \
+    --contamination 0.05 \
+    --project-name autoencoder-simple-outlier-trading-agent \
+    --output-directory artifacts \
+    --env-file-path .env
+```
+
+Options:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--ticker` | required | Ticker symbol, for example `AAPL` or `PETR4.SA`. |
+| `--start-date`, `--end-date` | `2020-01-01`, `2026-09-15` | Historical range (`YYYY-MM-DD`). |
+| `--train-split-ratio` | `0.7` | Fraction of the log-returns used for training, in time order. |
+| `--window-size` | `10` | Number of log-returns in each window. |
+| `--batch-size` | `32` | Windows per training batch. |
+| `--hidden-layer-size`, `--latent-layer-size` | `16`, `4` | Sizes of the autoencoder layers. |
+| `--epochs` | `300` | Number of training epochs. |
+| `--learning-rate` | `0.001` | Learning rate of the Adam optimizer. |
+| `--random-seed` | `42` | Seed for weight initialization and batch shuffling. |
+| `--contamination` | `0.05` | Expected fraction of anomalous windows; it sets the anomaly threshold. |
+| `--project-name` | `autoencoder-simple-outlier-trading-agent` | wandb project name. |
+| `--output-directory` | `artifacts` | Directory where the `.pt` weights are saved. |
+| `--env-file-path` | `.env` | `.env` file with `WANDB_API_KEY`. |
+| `--device` | automatic | `cpu` or `cuda`. |
+
+The script prints a summary line when it finishes, for example:
+
+```text
+ticker=AAPL final_train_loss=1.039433 validation_loss=0.469093 anomaly_threshold=2.228271 model_file_path=artifacts\simple-autoencoder-aapl.pt
+```
+
+The weights are saved as `<output-directory>/simple-autoencoder-<ticker>.pt`
+(the ticker is lowercased, and characters other than letters, digits,
+`.`, `_` and `-` become `-`). The wandb login uses `WANDB_API_KEY` from
+the `.env` file. Without a key, the run logs in anonymously. If the
+login fails (for example, without internet access), the run falls back
+to disabled tracking, and training still completes.
+
+Run `--help` to see the same options from the terminal:
+
+```bash
+uv run python -m generative_models.models.autoencoder.train_autoencoder --help
 ```
 
 ## Continuous integration
 
 The workflow defined in
-[`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs the
-test suite automatically:
+[`.github/workflows/autoencoder_pipeline.yml`](.github/workflows/autoencoder_pipeline.yml)
+(named "Autoencoder Pipeline") runs the test suite automatically:
 
 - when a pull request is opened,
 - on every new commit pushed to an open pull request,
 - and when a pull request is merged into `main`.
+
+The pipeline starts with `structure`, which checks the project layout:
+the required files (`pyproject.toml`, `uv.lock`, `README.md`,
+`requirements.txt`, `CLAUDE.md`, `Dockerfile`, `.gitignore`,
+`.dockerignore`, `.trivyignore`), that the `tests` folder exists, that
+`.env` is ignored by git and Docker and never tracked, that the Dockerfile
+installs from `uv.lock`, and that `uv.lock` matches `pyproject.toml`.
+Then `lint` runs pylint. Only after `lint` passes do `unit-tests`,
+`end-to-end-tests` and `security` run, in parallel. `test-report` writes a
+summary of the results to the job summary page. The `collect-data` job
+starts only when every check before it passes.
+
+Quality and security checks in the workflow:
+
+- `unit-tests` runs the unit tests. It fails when the coverage
+  of `src/generative_models` is below 90%, and it uploads the JUnit and
+  coverage XML reports as the `unit-test-reports` artifact.
+- `security` audits the runtime dependencies locked in `uv.lock` with
+  `pip-audit` (Windows-only pins are left out, because CI runs on Linux),
+  scans the source code with Bandit at medium severity and above, and scans
+  the git history for committed secrets with Gitleaks.
+- `test-report` ("Test report") runs after the tests and writes the job
+  results, the number of unit tests and the line coverage to the summary.
+- `pipeline-success` ("Pipeline Run Successfully") runs last. It fails when
+  any job did not succeed. On pull requests, the jobs that only run on push
+  are allowed to be skipped.
+- `build-image` scans the image with Trivy and fails on `CRITICAL` or `HIGH`
+  vulnerabilities that have a fix available. The list is written to the
+  job summary, before the image is saved or pushed.
+  Known exceptions are listed in `.trivyignore`, with a justification and
+  an expiry date.
+
+- `evaluate` writes the overfitting table to the job summary page.
+- Changes that only touch Markdown files, `specs/` or `docs/` do not start
+  the pipeline.
+- The shared setup (Python, uv, cache and dependencies) lives in the
+  composite action `.github/actions/setup-python-uv`.
+
+The same workflow has three more jobs, which only run after `collect-data`
+and its dependencies pass
+(`collect-data` and `train` are also started by hand from the Actions tab,
+where the ticker is chosen, default `AAPL`):
+
+1. `collect-data` downloads the daily prices of the ticker with
+   `generative_models.data.collect_market_data`. Before anything is saved,
+   the prices are checked with Great Expectations
+   (`generative_models.data.validation`): enough rows, no missing or
+   non-positive prices, unique and increasing dates, and no daily log-return
+   above 0.5 in absolute value. Invalid data stops the job. Then it saves a
+   CSV file with the `close_price`, `log_return` and `split` columns. The
+   `split` column marks the first 70% of the log-returns as `train`, the next
+   15% as `validation` and the last 15% as `test`, in chronological order.
+   The file is uploaded as the `market-data-<ticker>` artifact.
+2. `train` downloads that artifact and trains the autoencoder with
+   `--price-data-path`, using the `split` column. The validation split is
+   used during training to monitor it. After training, the model is
+   evaluated once on the test split, together with a naive baseline that
+   always predicts zero. The overfitting report (`*-overfitting.json`)
+   contains the training, validation and test errors and the baseline error.
+   It uploads the `.pt` weights and the report as the
+   `autoencoder-model-<ticker>` artifact.
+3. `evaluate` runs after `train`. It reads the report and fails unless both
+   conditions hold: the validation to training error ratio is at most 1.5
+   (no strong overfitting), and the test error is smaller than the baseline
+   error (the model learned something the naive prediction does not).
+
+To run the same steps locally, the end-to-end test simulates the prices,
+so it does not need network access or a wandb key:
+
+```bash
+uv run pytest tests/end_to_end
+```
+
+Training logs the run and the model artifact to wandb, so the workflow
+needs a `WANDB_API_KEY` repository secret (Settings > Secrets and
+variables > Actions). Without the secret, the run falls back to disabled
+tracking and the training still completes.
+
+The image is built by its own job, `build-image`, which starts after
+`train` succeeds. It saves the image as a workflow artifact, and the
+`push-image` job loads it, logs in to Docker Hub and pushes it with the
+`latest` tag and the commit SHA tag. Both jobs run on every branch, and
+training failures stop them. The workflow needs these repository secrets:
+
+- `DOCKERHUB_USERNAME`: the Docker Hub account name. The image is
+  published as `<DOCKERHUB_USERNAME>/financial-market-simulator`.
+- `DOCKERHUB_TOKEN`: a Docker Hub access token with write permission.
+
+The image serves the trained autoencoders through the FastAPI application
+in `generative_models.serving.api`, on port `8000`. To run it locally:
+
+```bash
+docker build -t financial-market-simulator .
+docker run --rm -p 8000:8000 \
+    -e WANDB_API_KEY=... \
+    financial-market-simulator
+```
+
+Then open `http://127.0.0.1:8000/docs` for the interactive API docs, or
+`http://127.0.0.1:8000/health` to check the service. At startup the
+container loads the default model from wandb, so it needs `WANDB_API_KEY`
+at runtime. The `.env` file is not copied into the image, so pass the key
+with `-e` or with `--env-file .env`. The container accepts these optional
+variables:
+
+- `AUTOENCODER_WANDB_PROJECT`: wandb project that holds the models.
+- `AUTOENCODER_WANDB_ENTITY`: wandb entity (user or team).
+- `AUTOENCODER_DEVICE`: `cpu` or `cuda`. Defaults to `cuda` when available.
+- `AUTOENCODER_PRELOAD_MODEL`: `false` to skip loading the default model
+  at startup.
 
 ## Contributing guidelines
 

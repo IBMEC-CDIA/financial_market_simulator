@@ -12,3 +12,6 @@ build/
 wandb/
 *.pt
 *draft*
+.coverage
+coverage.xml
+junit-unit.xml

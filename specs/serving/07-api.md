@@ -198,4 +198,5 @@ ao final. O mock serve um `AutoencoderPredictor` com um
 
 - Autenticação e controle de acesso.
 - Sinais de compra e venda.
-- Imagem Docker e deploy (pasta `docker/`).
+- Deploy em produção. A imagem Docker que serve a API está no
+  `Dockerfile` da raiz e é documentada no README.
