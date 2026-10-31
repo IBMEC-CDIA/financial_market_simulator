@@ -11,4 +11,6 @@ build/
 .ipynb_checkpoints/
 wandb/
 *.pt
-*draft*
+*draft*.coverage
+coverage.xml
+junit-unit.xml

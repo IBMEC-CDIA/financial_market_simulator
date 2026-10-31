@@ -10,6 +10,7 @@ from generative_models.models.autoencoder.autoencoder import (
 from generative_models.models.autoencoder.overfitting import (
     build_overfitting_report,
     build_report_path,
+    build_step_summary,
     is_overfitting_within_limit,
     load_overfitting_report,
     main,
@@ -95,6 +96,32 @@ def test_main_returns_false_when_ratio_exceeds_limit(tmp_path) -> None:
     )
 
     assert passed is False
+
+
+def test_build_step_summary_reports_result_and_ratio() -> None:
+    """Check that the Markdown table has the result and the ratio."""
+    report = build_overfitting_report("AAPL", _make_result(0.2, 0.3))
+
+    summary = build_step_summary(report, 1.0, passed=False)
+
+    assert "Result: **failed**" in summary
+    assert "| Validation / train ratio | 1.500 |" in summary
+    assert "| Limit | 1.000 |" in summary
+
+
+def test_main_appends_summary_to_github_step_summary(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Check that the summary is written when GITHUB_STEP_SUMMARY is set."""
+    report = build_overfitting_report("AAPL", _make_result(0.2, 0.3))
+    report_path = save_overfitting_report(report, tmp_path / "aapl.json")
+    summary_path = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+
+    main(["--report-path", str(report_path)])
+
+    assert "## Overfitting check" in summary_path.read_text(encoding="utf-8")
 
 
 def test_main_prints_a_summary_line(tmp_path, capsys) -> None:

@@ -3,9 +3,17 @@ name: Autoencoder Pipeline
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    paths-ignore:
+      - "**.md"
+      - "specs/**"
+      - "docs/**"
   push:
     branches:
       - "**"
+    paths-ignore:
+      - "**.md"
+      - "specs/**"
+      - "docs/**"
   workflow_dispatch:
     inputs:
       ticker:
@@ -23,45 +31,63 @@ concurrency:
 
 jobs:
   unit-tests:
+    name: Unit tests and lint
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
-        with:
-          python-version: "3.12.10"
-
-      - name: Install dependencies
-        run: uv sync --extra dev
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
 
       - name: Run pylint
         run: uv run pylint src/generative_models tests
 
-      - name: Run unit tests
-        run: uv run pytest --ignore=tests/end_to_end
+      - name: Run unit tests with coverage
+        run: >
+          uv run pytest
+          --ignore=tests/end_to_end
+          --cov=generative_models
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=90
+          --junitxml=junit-unit.xml
+
+      - name: Audit runtime dependencies
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project \
+            --output-file requirements-lock.txt
+          grep -v "sys_platform == 'win32'" requirements-lock.txt \
+            | sed -E 's/\+cu[0-9]+//' > requirements-audit.txt
+          uvx pip-audit --disable-pip --no-deps --requirement requirements-audit.txt
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            junit-unit.xml
+            coverage.xml
+          if-no-files-found: ignore
 
   end-to-end-tests:
+    name: End-to-end tests
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
-        with:
-          python-version: "3.12.10"
-
-      - name: Install dependencies
-        run: uv sync --extra dev
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
 
       - name: Run end-to-end tests
         run: uv run pytest tests/end_to_end
 
   collect-data:
+    name: Collect market data
     needs:
       - unit-tests
       - end-to-end-tests
@@ -78,13 +104,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
-        with:
-          python-version: "3.12.10"
-
-      - name: Install dependencies
-        run: uv sync --extra dev
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
 
       - name: Collect the market prices
         run: >
@@ -100,6 +121,7 @@ jobs:
           if-no-files-found: error
 
   train:
+    name: Train autoencoder
     needs: collect-data
     if: >
       github.event_name == 'push' ||
@@ -115,13 +137,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
-        with:
-          python-version: "3.12.10"
-
-      - name: Install dependencies
-        run: uv sync --extra dev
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
 
       - name: Download market prices
         uses: actions/download-artifact@v4
@@ -147,6 +164,7 @@ jobs:
           if-no-files-found: error
 
   evaluate:
+    name: Evaluate overfitting
     needs: train
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -158,13 +176,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
-        with:
-          python-version: "3.12.10"
-
-      - name: Install dependencies
-        run: uv sync --extra dev
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
 
       - name: Download model weights and report
         uses: actions/download-artifact@v4
@@ -178,6 +191,7 @@ jobs:
           --report-path artifacts/*-overfitting.json
 
   build-image:
+    name: Build Docker image
     needs: train
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -198,6 +212,14 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/financial-market-simulator:${{ github.sha }}
 
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/financial-market-simulator:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
       - name: Save image to a file
         env:
           IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/financial-market-simulator
@@ -211,6 +233,7 @@ jobs:
           if-no-files-found: error
 
   push-image:
+    name: Push Docker image
     needs: build-image
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -184,6 +185,47 @@ def is_overfitting_within_limit(
     return report.overfitting_ratio <= max_overfitting_ratio
 
 
+def build_step_summary(
+    report: OverfittingReport,
+    max_overfitting_ratio: float,
+    passed: bool,
+) -> str:
+    """Build the Markdown table shown on the summary page of a CI job.
+
+    Parameters
+    ----------
+    report : OverfittingReport
+        Report of the training run.
+    max_overfitting_ratio : float
+        Limit that the ratio was checked against.
+    passed : bool
+        Result of the check.
+
+    Returns
+    -------
+    str
+        Markdown with the result and the errors of the run.
+    """
+    status = "passed" if passed else "failed"
+
+    return "\n".join(
+        [
+            "## Overfitting check",
+            "",
+            f"Result: **{status}**",
+            "",
+            "| Metric | Value |",
+            "| --- | --- |",
+            f"| Ticker | {report.ticker} |",
+            f"| Train error (MSE) | {report.train_evaluation_loss:.6f} |",
+            f"| Validation error (MSE) | {report.validation_loss:.6f} |",
+            f"| Validation / train ratio | {report.overfitting_ratio:.3f} |",
+            f"| Limit | {max_overfitting_ratio:.3f} |",
+            "",
+        ]
+    )
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     """Create the parser of the overfitting evaluation script.
 
@@ -250,6 +292,16 @@ def main(
         f"max_overfitting_ratio={arguments.max_overfitting_ratio:.3f} "
         f"passed={is_within_limit}"
     )
+
+    summary_path = os.getenv("GITHUB_STEP_SUMMARY")
+    if summary_path:
+        summary_markdown = build_step_summary(
+            report,
+            arguments.max_overfitting_ratio,
+            is_within_limit,
+        )
+        with Path(summary_path).open("a", encoding="utf-8") as summary_file:
+            summary_file.write(summary_markdown)
 
     return is_within_limit
 

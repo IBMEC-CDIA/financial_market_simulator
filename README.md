@@ -234,6 +234,22 @@ The workflow runs the unit tests (`unit-tests`, with pylint) and the
 end-to-end tests (`end-to-end-tests`) in parallel. The `collect-data` job
 only starts when both of them pass.
 
+Quality and security checks in the workflow:
+
+- `unit-tests` runs pylint and the unit tests. It fails when the coverage
+  of `src/generative_models` is below 90%, and it uploads the JUnit and
+  coverage XML reports as the `unit-test-reports` artifact.
+- `unit-tests` also audits the runtime dependencies locked in `uv.lock`
+  with `pip-audit`. Windows-only pins are left out, because CI runs on
+  Linux. The job fails when a locked version has a known vulnerability.
+- `build-image` scans the image with Trivy and fails on fixed `CRITICAL`
+  or `HIGH` vulnerabilities, before the image is saved or pushed.
+- `evaluate` writes the overfitting table to the job summary page.
+- Changes that only touch Markdown files, `specs/` or `docs/` do not start
+  the pipeline.
+- The shared setup (Python, uv, cache and dependencies) lives in the
+  composite action `.github/actions/setup-python-uv`.
+
 The same workflow has three more jobs, which only run after `collect-data`
 and its dependencies pass
 (`collect-data` and `train` are also started by hand from the Actions tab,
