@@ -225,16 +225,16 @@ jobs:
 
       - name: Fail on fixable CRITICAL or HIGH vulnerabilities
         run: |
-          FIXABLE_FILTER='[.Results[]?.Vulnerabilities[]? | select(.FixedVersion != null and .FixedVersion != "")]'
-          FIXABLE_COUNT=$(jq "$FIXABLE_FILTER | length" trivy-report.json)
+          FIXABLE_LIST=$(jq -r '.Results[]? as $result | $result.Vulnerabilities[]? | select(.FixedVersion != null and .FixedVersion != "") | "\($result.Target) \(.Severity) \(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"' trivy-report.json)
+          FIXABLE_COUNT=$(printf '%s\n' "$FIXABLE_LIST" | grep -c . || true)
           {
             echo "## Image vulnerabilities"
             echo ""
             echo "Fixable CRITICAL or HIGH vulnerabilities: $FIXABLE_COUNT"
             echo ""
-            jq -r "$FIXABLE_FILTER | .[] | \"- \(.Severity) \(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)\"" trivy-report.json
+            printf '%s\n' "$FIXABLE_LIST" | sed '/^$/d; s/^/- /'
           } >> "$GITHUB_STEP_SUMMARY"
-          jq -r "$FIXABLE_FILTER | .[] | \"\(.Severity) \(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)\"" trivy-report.json
+          printf '%s\n' "$FIXABLE_LIST" | sed '/^$/d'
           test "$FIXABLE_COUNT" -eq 0
 
       - name: Save image to a file
