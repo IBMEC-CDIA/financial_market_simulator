@@ -243,7 +243,11 @@ Quality and security checks in the workflow:
   with `pip-audit`. Windows-only pins are left out, because CI runs on
   Linux. The job fails when a locked version has a known vulnerability.
 - `build-image` scans the image with Trivy and fails on `CRITICAL` or `HIGH`
-  vulnerabilities that have a fix available. The list is written to the job summary, before the image is saved or pushed.
+  vulnerabilities that have a fix available. The list is written to the
+  job summary, before the image is saved or pushed.
+  Known exceptions are listed in `.trivyignore`, with a justification and
+  an expiry date.
+
 - `evaluate` writes the overfitting table to the job summary page.
 - Changes that only touch Markdown files, `specs/` or `docs/` do not start
   the pipeline.
