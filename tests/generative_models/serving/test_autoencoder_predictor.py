@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from generative_models.models.autoencoder.trainer import (
+from generative_models.models.base_autoencoder.trainer import (
     compute_reconstruction_scores,
 )
 

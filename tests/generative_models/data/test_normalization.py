@@ -2,7 +2,7 @@
 
 import torch
 
-from generative_models.common.normalization import normalize_series
+from generative_models.data.normalization import normalize_series
 
 
 def test_normalize_series_returns_zero_mean_unit_std() -> None:

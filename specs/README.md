@@ -32,8 +32,8 @@ Cada spec traz, no cabeçalho, uma das situações abaixo:
 | **Fornecido** | O módulo e os testes já existem, porque o notebook de partida já os importa do pacote. | Leia a spec e os testes existentes como referência; não reimplemente. |
 
 Os módulos fornecidos são `data/market_data.py`, `data/datasets.py`,
-`common/normalization.py`, `tracking/wandb_tracker.py` e
-`serving/model_registry.py`. Eles mostram, em código já pronto, o
+`data/normalization.py`, `tracking/wandb_tracker.py` e
+`registry/model_registry.py`. Eles mostram, em código já pronto, o
 padrão de implementação e de testes esperado nas specs a implementar.
 
 Dentro de uma trilha, uma referência como "spec 05" aponta para a

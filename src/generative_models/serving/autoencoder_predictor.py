@@ -5,11 +5,11 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from generative_models.common.normalization import normalize_series
-from generative_models.models.autoencoder.autoencoder import (
+from generative_models.data.normalization import normalize_series
+from generative_models.models.base_autoencoder.autoencoder import (
     SimpleAutoencoder,
 )
-from generative_models.models.autoencoder.trainer import (
+from generative_models.models.base_autoencoder.trainer import (
     compute_reconstruction_scores,
 )
 

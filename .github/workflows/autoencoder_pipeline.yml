@@ -302,7 +302,7 @@ jobs:
 
       - name: Train the autoencoder model
         run: >
-          uv run python -m generative_models.models.autoencoder.train_autoencoder
+          uv run python -m generative_models.models.base_autoencoder.train_autoencoder
           --ticker "$TRAIN_TICKER"
           --price-data-path "market-data/$TRAIN_TICKER.csv"
           --device cpu
@@ -341,7 +341,7 @@ jobs:
 
       - name: Check overfitting
         run: >
-          uv run python -m generative_models.models.autoencoder.overfitting
+          uv run python -m generative_models.models.base_autoencoder.overfitting
           --report-path artifacts/*-overfitting.json
 
   build-image:

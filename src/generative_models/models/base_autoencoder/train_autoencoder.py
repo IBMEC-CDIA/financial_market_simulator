@@ -3,19 +3,19 @@
 import argparse
 
 from generative_models.data.market_data import load_price_series
-from generative_models.models.autoencoder.config import (
+from generative_models.models.base_autoencoder.config import (
     AutoencoderArchitectureConfig,
     AutoencoderTrainingConfig,
     MarketDataConfig,
     OptimizationConfig,
     TrackingConfig,
 )
-from generative_models.models.autoencoder.overfitting import (
+from generative_models.models.base_autoencoder.overfitting import (
     build_overfitting_report,
     build_report_path,
     save_overfitting_report,
 )
-from generative_models.models.autoencoder.trainer import (
+from generative_models.models.base_autoencoder.trainer import (
     AutoencoderTrainer,
     AutoencoderTrainingResult,
 )

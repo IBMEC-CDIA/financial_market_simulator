@@ -4,7 +4,7 @@ import os
 import threading
 from dataclasses import dataclass
 
-from generative_models.models.autoencoder.config import TrackingConfig
+from generative_models.models.base_autoencoder.config import TrackingConfig
 from generative_models.serving.autoencoder_predictor import (
     AutoencoderModelMetadata,
     AutoencoderPredictor,

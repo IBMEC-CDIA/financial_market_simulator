@@ -2,7 +2,7 @@
 
 import pytest
 
-from generative_models.models.autoencoder.config import (
+from generative_models.models.base_autoencoder.config import (
     AutoencoderArchitectureConfig,
     AutoencoderTrainingConfig,
     MarketDataConfig,

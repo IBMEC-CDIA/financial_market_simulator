@@ -6,11 +6,11 @@ from dotenv import load_dotenv
 import torch
 import wandb
 
-from generative_models.models.autoencoder.autoencoder import (
+from generative_models.models.base_autoencoder.autoencoder import (
     SimpleAutoencoder,
 )
-from generative_models.models.autoencoder.config import TrackingConfig
-from generative_models.models.autoencoder.trainer import (
+from generative_models.models.base_autoencoder.config import TrackingConfig
+from generative_models.models.base_autoencoder.trainer import (
     MODEL_NAME_PREFIX,
     build_ticker_slug,
 )
@@ -18,7 +18,7 @@ from generative_models.serving.autoencoder_predictor import (
     AutoencoderModelMetadata,
     AutoencoderPredictor,
 )
-from generative_models.serving.model_registry import ModelRegistry
+from generative_models.registry.model_registry import ModelRegistry
 
 REQUIRED_METADATA_KEYS = (
     "ticker",

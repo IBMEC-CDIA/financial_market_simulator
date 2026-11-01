@@ -10,15 +10,15 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from generative_models.common.normalization import normalize_series
+from generative_models.data.normalization import normalize_series
 from generative_models.data.datasets import (
     SlidingWindowReconstructionDataset,
 )
 from generative_models.data.market_data import fetch_price_series
-from generative_models.models.autoencoder.autoencoder import (
+from generative_models.models.base_autoencoder.autoencoder import (
     SimpleAutoencoder,
 )
-from generative_models.models.autoencoder.config import (
+from generative_models.models.base_autoencoder.config import (
     AutoencoderTrainingConfig,
 )
 from generative_models.tracking.wandb_tracker import (

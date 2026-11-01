@@ -11,14 +11,14 @@ import pandas as pd
 import pytest
 
 from generative_models.data.collect_market_data import main as collect_main
-from generative_models.models.autoencoder.overfitting import (
+from generative_models.models.base_autoencoder.overfitting import (
     build_report_path,
     load_overfitting_report,
 )
-from generative_models.models.autoencoder.overfitting import (
+from generative_models.models.base_autoencoder.overfitting import (
     main as evaluate_main,
 )
-from generative_models.models.autoencoder.train_autoencoder import (
+from generative_models.models.base_autoencoder.train_autoencoder import (
     main as train_main,
 )
 

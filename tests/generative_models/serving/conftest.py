@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import torch
 
-from generative_models.models.autoencoder.autoencoder import (
+from generative_models.models.base_autoencoder.autoencoder import (
     SimpleAutoencoder,
 )
 from generative_models.serving.autoencoder_predictor import (

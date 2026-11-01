@@ -2,7 +2,7 @@
 
 import torch
 
-from generative_models.models.autoencoder.autoencoder import (
+from generative_models.models.base_autoencoder.autoencoder import (
     SimpleAutoencoder,
 )
 

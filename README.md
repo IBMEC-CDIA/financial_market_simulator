@@ -117,9 +117,9 @@ unit tests. The specs are split into two tracks:
   FastAPI application.
 
 The base modules the notebook already imports
-(`data/market_data.py`, `data/datasets.py`, `common/normalization.py`
+(`data/market_data.py`, `data/datasets.py`, `data/normalization.py`
 and `tracking/wandb_tracker.py`), as well as the `ModelRegistry`
-interface (`serving/model_registry.py`), are provided and documented
+interface (`registry/model_registry.py`), are provided and documented
 by their own specs as reference. Start from
 [`specs/README.md`](specs/README.md), which explains the workflow and
 the order of the tracks.
@@ -137,12 +137,12 @@ The training script trains the autoencoder of one ticker, logs the run
 to wandb and saves the weights in the output directory. Only `--ticker`
 is required; every other option defaults to the values of the
 configuration dataclasses in
-`src/generative_models/models/autoencoder/config.py`.
+`src/generative_models/models/base_autoencoder/config.py`.
 
 Quick run with a short history and two epochs (PowerShell):
 
 ```powershell
-uv run python -m generative_models.models.autoencoder.train_autoencoder `
+uv run python -m generative_models.models.base_autoencoder.train_autoencoder `
     --ticker AAPL `
     --start-date 2024-01-01 `
     --end-date 2024-12-31 `
@@ -155,7 +155,7 @@ uv run python -m generative_models.models.autoencoder.train_autoencoder `
 The same run in bash:
 
 ```bash
-uv run python -m generative_models.models.autoencoder.train_autoencoder \
+uv run python -m generative_models.models.base_autoencoder.train_autoencoder \
     --ticker AAPL \
     --start-date 2024-01-01 \
     --end-date 2024-12-31 \
@@ -169,7 +169,7 @@ A complete run with the default settings (300 epochs, window of 10
 log-returns) and the wandb project and output directory set explicitly:
 
 ```bash
-uv run python -m generative_models.models.autoencoder.train_autoencoder \
+uv run python -m generative_models.models.base_autoencoder.train_autoencoder \
     --ticker PETR4.SA \
     --start-date 2020-01-01 \
     --end-date 2026-09-15 \
@@ -217,7 +217,7 @@ to disabled tracking, and training still completes.
 Run `--help` to see the same options from the terminal:
 
 ```bash
-uv run python -m generative_models.models.autoencoder.train_autoencoder --help
+uv run python -m generative_models.models.base_autoencoder.train_autoencoder --help
 ```
 
 ## Continuous integration

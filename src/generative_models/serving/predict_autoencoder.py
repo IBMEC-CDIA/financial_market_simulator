@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from generative_models.data.market_data import fetch_price_series
-from generative_models.models.autoencoder.config import TrackingConfig
+from generative_models.models.base_autoencoder.config import TrackingConfig
 from generative_models.serving.autoencoder_predictor import (
     AutoencoderPrediction,
     AutoencoderPredictor,

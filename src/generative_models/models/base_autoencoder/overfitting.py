@@ -6,7 +6,7 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from generative_models.models.autoencoder.trainer import (
+from generative_models.models.base_autoencoder.trainer import (
     AutoencoderTrainingResult,
 )
 

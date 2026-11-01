@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from generative_models.models.autoencoder.autoencoder import (
+from generative_models.models.base_autoencoder.autoencoder import (
     SimpleAutoencoder,
 )
-from generative_models.models.autoencoder.overfitting import (
+from generative_models.models.base_autoencoder.overfitting import (
     build_overfitting_report,
     build_report_path,
     build_step_summary,
@@ -16,7 +16,7 @@ from generative_models.models.autoencoder.overfitting import (
     main,
     save_overfitting_report,
 )
-from generative_models.models.autoencoder.trainer import (
+from generative_models.models.base_autoencoder.trainer import (
     AutoencoderTrainingResult,
 )
 

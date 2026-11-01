@@ -10,7 +10,7 @@ from generative_models.data.market_data import (
     save_price_series,
 )
 from generative_models.data.validation import validate_price_dataset
-from generative_models.models.autoencoder.config import MarketDataConfig
+from generative_models.models.base_autoencoder.config import MarketDataConfig
 
 
 def build_argument_parser() -> argparse.ArgumentParser:

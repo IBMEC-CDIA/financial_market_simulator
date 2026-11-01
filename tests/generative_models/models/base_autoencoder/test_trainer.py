@@ -7,10 +7,10 @@ import pandas as pd
 import pytest
 import torch
 
-from generative_models.models.autoencoder.autoencoder import (
+from generative_models.models.base_autoencoder.autoencoder import (
     SimpleAutoencoder,
 )
-from generative_models.models.autoencoder.config import (
+from generative_models.models.base_autoencoder.config import (
     AutoencoderTrainingConfig,
     MarketDataConfig,
     OptimizationConfig,
@@ -20,17 +20,17 @@ from generative_models.data.market_data import (
     add_log_return_column,
     add_split_column,
 )
-from generative_models.models.autoencoder.trainer import (
+from generative_models.models.base_autoencoder.trainer import (
     AutoencoderTrainer,
     build_ticker_slug,
     compute_reconstruction_scores,
 )
 
 FETCH_PRICE_SERIES_PATH = (
-    "generative_models.models.autoencoder.trainer.fetch_price_series"
+    "generative_models.models.base_autoencoder.trainer.fetch_price_series"
 )
 TRACKER_PATH = (
-    "generative_models.models.autoencoder.trainer.WandbExperimentTracker"
+    "generative_models.models.base_autoencoder.trainer.WandbExperimentTracker"
 )
 
 
