@@ -33,11 +33,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check that README.md exists and is not empty
+        run: |
+          if [ -s README.md ]; then
+            echo "ok: README.md"
+          else
+            echo "missing or empty file: README.md"
+            exit 1
+          fi
+
       - name: Check required files and ignore rules
         run: |
           status=0
           for required_file in \
-            pyproject.toml uv.lock README.md requirements.txt CLAUDE.md \
+            pyproject.toml uv.lock requirements.txt CLAUDE.md \
             Dockerfile .gitignore .dockerignore .trivyignore \
             .github/workflows/ci.yml \
             .github/actions/setup-python-uv/action.yml
