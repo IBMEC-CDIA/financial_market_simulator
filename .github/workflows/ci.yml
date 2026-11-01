@@ -89,7 +89,7 @@ jobs:
         run: uv lock --check
 
   lint:
-    name: Lint
+    name: Python Code Qualidty Check (Lint)
     needs: structure
     runs-on: ubuntu-latest
 
