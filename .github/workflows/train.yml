@@ -44,6 +44,7 @@ jobs:
       - name: Require a successful CI run for this commit
         run: |
           successful_runs=$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
             --workflow ci.yml \
             --commit "$GITHUB_SHA" \
             --status success \
