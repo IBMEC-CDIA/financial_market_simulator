@@ -302,7 +302,7 @@ jobs:
 
       - name: Train the autoencoder model
         run: >
-          uv run python -m generative_models.models.base_autoencoder.train_autoencoder
+          uv run python -m generative_models.models.base_autoencoder.run_train_script
           --ticker "$TRAIN_TICKER"
           --price-data-path "market-data/$TRAIN_TICKER.csv"
           --device cpu

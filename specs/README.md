@@ -17,6 +17,7 @@ de aceite sejam atendidos.
 |---|---|---|---|
 | Treino | [`training/`](training/README.md) | Pipeline de treino executável pela linha de comando, com rastreamento no wandb | - |
 | Serving | [`serving/`](serving/README.md) | Carregamento dos modelos do wandb, script de predição e API FastAPI | Trilha de treino concluída |
+| Padrão de projeto | [`project_structure_check/`](project_structure_check/README.md) | Contrato que qualquer modelo novo em `models/` segue para rodar os workflows | - |
 
 Cada pasta tem um `README.md` com a ordem das specs e o mapa entre as
 células do notebook (ou os módulos de treino) e os módulos a

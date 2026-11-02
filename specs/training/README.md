@@ -5,7 +5,7 @@ Converte o treinamento do notebook
 pela linha de comando:
 
 ```bash
-uv run python -m generative_models.models.base_autoencoder.train_autoencoder \
+uv run python -m generative_models.models.base_autoencoder.run_train_script \
     --ticker AAPL
 ```
 
@@ -23,7 +23,7 @@ no [README das specs](../README.md).
 | 05 | [Configuração do treino](05-training-config.md) | `models/base_autoencoder/config.py` | A implementar | - |
 | 06 | [Rastreamento com wandb](06-wandb-experiment-tracker.md) | `tracking/wandb_tracker.py` | Fornecido | - |
 | 07 | [Pipeline de treino](07-autoencoder-trainer.md) | `models/base_autoencoder/trainer.py` | A implementar | 01 a 06 |
-| 08 | [Script de linha de comando](08-train-cli.md) | `models/base_autoencoder/train_autoencoder.py` | A implementar | 05, 07 |
+| 08 | [Script de linha de comando](08-train-cli.md) | `models/base_autoencoder/run_train_script.py` | A implementar | 05, 07 |
 
 Os caminhos de **Arquivo** são relativos a `src/generative_models/`.
 As specs fornecidas descrevem módulos que o notebook já importa do

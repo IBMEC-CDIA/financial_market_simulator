@@ -18,7 +18,7 @@ from generative_models.models.base_autoencoder.overfitting import (
 from generative_models.models.base_autoencoder.overfitting import (
     main as evaluate_main,
 )
-from generative_models.models.base_autoencoder.train_autoencoder import (
+from generative_models.models.base_autoencoder.run_train_script import (
     main as train_main,
 )
 

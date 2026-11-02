@@ -9,14 +9,14 @@ from generative_models.data.market_data import save_price_series
 from generative_models.models.base_autoencoder.config import (
     AutoencoderTrainingConfig,
 )
-from generative_models.models.base_autoencoder.train_autoencoder import (
+from generative_models.models.base_autoencoder.run_train_script import (
     build_argument_parser,
     build_training_config,
     main,
 )
 
 TRAINER_PATH = (
-    "generative_models.models.base_autoencoder.train_autoencoder."
+    "generative_models.models.base_autoencoder.run_train_script."
     "AutoencoderTrainer"
 )
 

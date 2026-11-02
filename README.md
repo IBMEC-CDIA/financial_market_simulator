@@ -142,7 +142,7 @@ configuration dataclasses in
 Quick run with a short history and two epochs (PowerShell):
 
 ```powershell
-uv run python -m generative_models.models.base_autoencoder.train_autoencoder `
+uv run python -m generative_models.models.base_autoencoder.run_train_script `
     --ticker AAPL `
     --start-date 2024-01-01 `
     --end-date 2024-12-31 `
@@ -155,7 +155,7 @@ uv run python -m generative_models.models.base_autoencoder.train_autoencoder `
 The same run in bash:
 
 ```bash
-uv run python -m generative_models.models.base_autoencoder.train_autoencoder \
+uv run python -m generative_models.models.base_autoencoder.run_train_script \
     --ticker AAPL \
     --start-date 2024-01-01 \
     --end-date 2024-12-31 \
@@ -169,7 +169,7 @@ A complete run with the default settings (300 epochs, window of 10
 log-returns) and the wandb project and output directory set explicitly:
 
 ```bash
-uv run python -m generative_models.models.base_autoencoder.train_autoencoder \
+uv run python -m generative_models.models.base_autoencoder.run_train_script \
     --ticker PETR4.SA \
     --start-date 2020-01-01 \
     --end-date 2026-09-15 \
@@ -217,7 +217,7 @@ to disabled tracking, and training still completes.
 Run `--help` to see the same options from the terminal:
 
 ```bash
-uv run python -m generative_models.models.base_autoencoder.train_autoencoder --help
+uv run python -m generative_models.models.base_autoencoder.run_train_script --help
 ```
 
 ## Continuous integration
@@ -339,6 +339,33 @@ variables:
 - `AUTOENCODER_DEVICE`: `cpu` or `cuda`. Defaults to `cuda` when available.
 - `AUTOENCODER_PRELOAD_MODEL`: `false` to skip loading the default model
   at startup.
+
+### Training workflow (`train.yml`)
+
+The training workflow is started by hand from the Actions tab (Run workflow),
+or from the command line with `gh workflow run train.yml -f ticker=AAPL`. It
+has inputs for the ticker, the number of epochs, the learning rate and the
+window size.
+
+It runs these jobs in order:
+
+1. `ci-check` stops the run unless the CI workflow passed for the same commit.
+2. `test-end-to-end` runs the end-to-end tests.
+3. `collect-data` downloads and validates the prices, then uploads them.
+4. `train-autoencoder` trains the model from `models/base_autoencoder` and
+   uploads the weights and the overfitting report. It needs the
+   `WANDB_API_KEY` repository secret to log the run.
+5. `evaluate` checks the overfitting ratio and the baseline comparison.
+
+### Build workflow (`build.yml`)
+
+The build workflow is also started by hand, with Run workflow. It checks that
+the CI passed for the same commit, builds the Docker image locally and scans
+it with Trivy. It fails on fixable `CRITICAL` or `HIGH` vulnerabilities. It
+does not log in to Docker Hub and does not push the image.
+
+Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
+unless every job before it succeeded.
 
 ## Contributing guidelines
 
