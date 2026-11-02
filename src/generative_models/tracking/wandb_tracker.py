@@ -3,10 +3,11 @@
 import os
 
 import torch
-import wandb
 from dotenv import load_dotenv
 from torch import nn
 from tqdm.auto import tqdm
+
+import wandb
 
 
 class WandbExperimentTracker:
@@ -89,8 +90,13 @@ class WandbExperimentTracker:
         If a `WANDB_API_KEY` was found in the environment, an
         authenticated login is attempted. Otherwise, an anonymous
         login is attempted. If either attempt fails, tracking is
-        disabled and training can proceed without an active run.
+        disabled and training can proceed without an active run. When
+        `WANDB_MODE` is `disabled`, no login is attempted at all.
         """
+        if os.getenv("WANDB_MODE") == "disabled":
+            self.wandb_mode = "disabled"
+            return
+
         try:
             if self.wandb_api_key:
                 wandb.login(

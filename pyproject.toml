@@ -18,8 +18,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-cov",
     "pylint",
     "httpx>=0.28.1",
+    "great-expectations>=1.24.1",
 ]
 
 [build-system]

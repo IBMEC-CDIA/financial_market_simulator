@@ -17,6 +17,7 @@ de aceite sejam atendidos.
 |---|---|---|---|
 | Treino | [`training/`](training/README.md) | Pipeline de treino executável pela linha de comando, com rastreamento no wandb | - |
 | Serving | [`serving/`](serving/README.md) | Carregamento dos modelos do wandb, script de predição e API FastAPI | Trilha de treino concluída |
+| Padrão de projeto | [`project_structure_check/`](project_structure_check/README.md) | Contrato que qualquer modelo novo em `models/` segue para rodar os workflows | - |
 
 Cada pasta tem um `README.md` com a ordem das specs e o mapa entre as
 células do notebook (ou os módulos de treino) e os módulos a
@@ -32,8 +33,8 @@ Cada spec traz, no cabeçalho, uma das situações abaixo:
 | **Fornecido** | O módulo e os testes já existem, porque o notebook de partida já os importa do pacote. | Leia a spec e os testes existentes como referência; não reimplemente. |
 
 Os módulos fornecidos são `data/market_data.py`, `data/datasets.py`,
-`common/normalization.py`, `tracking/wandb_tracker.py` e
-`serving/model_registry.py`. Eles mostram, em código já pronto, o
+`data/normalization.py`, `tracking/wandb_tracker.py` e
+`registry/model_registry.py`. Eles mostram, em código já pronto, o
 padrão de implementação e de testes esperado nas specs a implementar.
 
 Dentro de uma trilha, uma referência como "spec 05" aponta para a
@@ -55,7 +56,7 @@ Para cada spec **a implementar**, na ordem do `README.md` da trilha:
 5. Rode `uv run pylint src/generative_models tests` e
    `uv run pytest` até ficarem verdes.
 6. Abra um pull request com a spec implementada. A CI
-   (`.github/workflows/tests.yml`) executa as mesmas verificações.
+   (`.github/workflows/autoencoder_pipeline.yml`) executa as mesmas verificações.
 
 Só avance para a próxima spec quando a anterior estiver verde: cada
 módulo depende dos anteriores.

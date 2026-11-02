@@ -1,0 +1,6 @@
+# CVE-2026-111943: Go standard library 1.27.2 embedded in the wandb-core
+# binary shipped with the wandb package. The fix is in Go 1.27.3, and
+# wandb 0.31.0 is the latest release, so this cannot be fixed by upgrading
+# the project. Review when a newer wandb release is available, or by the
+# expiry date below.
+CVE-2026-111943 exp:2026-12-31

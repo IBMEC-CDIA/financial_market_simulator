@@ -76,3 +76,26 @@ def func1(
   - Program: `<PROGRAM_PLACEHOLDER>`
 - Do not use emojis or emoticons anywhere in the notebook (code or text
   cells), to keep the course material looking professional.
+
+## Cache and generated files
+
+Cache and generated files must not stay in the repository. Whenever you
+run tests, linters, coverage or scripts, delete the cache files they leave
+behind when you are done. Delete them without asking:
+
+- `__pycache__` folders and `*.pyc` files
+- `.pytest_cache`, `.ruff_cache`, `.mypy_cache`
+- `.coverage`, `coverage.xml`, `junit-unit.xml`
+
+Never delete the `.venv` folder, the `.env` file, the `wandb/` folder, the
+`artifacts/` folder or any file tracked by git. Those are the user's work or
+its environment.
+
+## Documentation
+
+Documentation must stay up to date with the code. On every commit, review
+`README.md` and every other documentation file that the change touches or
+makes outdated: the `specs/` folder, the `docs/` folder when it exists, the
+docstrings of the changed code, and the workflow comments and names. Update
+them in the same commit as the code change. A commit that makes the README
+or a spec describe the wrong behavior, paths or commands is not complete.

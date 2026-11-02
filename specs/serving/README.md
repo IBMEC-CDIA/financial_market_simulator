@@ -20,7 +20,7 @@ todas as specs de treino estiverem verdes.
 | # | Spec | Arquivo | Situação | Depende de |
 |---|---|---|---|---|
 | 01 | [Preditor do autoencoder](01-autoencoder-predictor.md) | `serving/autoencoder_predictor.py` | A implementar | `training/02`, `training/04`, `training/07` |
-| 02 | [Interface de registro de modelos](02-model-registry.md) | `serving/model_registry.py` | Fornecido | - |
+| 02 | [Interface de registro de modelos](02-model-registry.md) | `registry/model_registry.py` | Fornecido | - |
 | 03 | [Registro de modelos no wandb](03-wandb-autoencoder-registry.md) | `serving/wandb_autoencoder_registry.py` | A implementar | 01, 02, `training/05`, `training/07` |
 | 04 | [Script de predição](04-predict-cli.md) | `serving/predict_autoencoder.py` | A implementar | 01, 03, `training/01` |
 | 05 | [Serviço de modelos (singleton)](05-model-service.md) | `serving/model_service.py` | A implementar | 03, 04 |
