@@ -42,7 +42,7 @@ jobs:
   ci-check:
     name: Check that CI passed for this commit
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 35
     permissions:
       actions: read
       contents: read
@@ -51,21 +51,29 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
-      - name: Require a successful CI run
+      - name: Wait for the CI run of this commit
         run: |
-          successful_runs=$(gh run list \
-            --repo "$GITHUB_REPOSITORY" \
-            --workflow ci.yml \
-            --commit "$GITHUB_SHA" \
-            --status success \
-            --limit 1 \
-            --json databaseId \
-            --jq 'length')
-          if [ "$successful_runs" -lt 1 ]; then
-            echo "No successful CI run was found for commit $GITHUB_SHA."
-            exit 1
-          fi
-          echo "CI passed for commit $GITHUB_SHA."
+          for attempt in $(seq 1 60); do
+            successful_runs=$(gh run list               --repo "$GITHUB_REPOSITORY"               --workflow ci.yml               --commit "$GITHUB_SHA"               --status success               --limit 1               --json databaseId               --jq 'length')
+            if [ "$successful_runs" -ge 1 ]; then
+              echo "CI passed for commit $GITHUB_SHA."
+              exit 0
+            fi
+            total_runs=$(gh run list               --repo "$GITHUB_REPOSITORY"               --workflow ci.yml               --commit "$GITHUB_SHA"               --json databaseId               --jq 'length')
+            pending_runs=$(gh run list               --repo "$GITHUB_REPOSITORY"               --workflow ci.yml               --commit "$GITHUB_SHA"               --json status               --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$pending_runs" -eq 0 ] && [ "$total_runs" -gt 0 ]; then
+              echo "The CI runs of commit $GITHUB_SHA finished without success."
+              exit 1
+            fi
+            if [ "$pending_runs" -eq 0 ] && [ "$attempt" -ge 6 ]; then
+              echo "No CI run was found for commit $GITHUB_SHA after 3 minutes."
+              exit 1
+            fi
+            echo "Waiting for the CI of commit $GITHUB_SHA (attempt $attempt of 60)."
+            sleep 30
+          done
+          echo "Timed out waiting for the CI of commit $GITHUB_SHA."
+          exit 1
 
   plan:
     name: Check tickers and W&B key

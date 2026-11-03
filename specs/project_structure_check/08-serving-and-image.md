@@ -42,7 +42,9 @@ ignorado.
 
 ## Build da imagem (`build.yml`)
 
-1. O job `ci-check` confirma que o CI passou para o commit.
+1. O job `ci-check` confirma que o CI passou para o commit. Se o CI do commit
+   ainda estiver em execução, o job espera até 30 minutos. Ele falha se o CI
+   terminar sem sucesso, ou se nenhum run aparecer em 3 minutos.
 2. O job `build-image` preenche a pasta `models/` de uma destas formas:
    - com `train_run_id` informado, baixa o artifact `trained-models` desse
      run do `train.yml`;
