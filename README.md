@@ -1,11 +1,41 @@
 # Financial Market Simulator
 
-Financial Market Simulator is a research and teaching project that
-explores generative deep learning models applied to financial time
-series (for example, stock log-returns). The goal is to model,
-reconstruct and simulate realistic market data using approaches that
-range from simple regression baselines to autoencoders, variational
-autoencoders (VAEs) and conditional VAEs (CVAEs).
+Financial Market Simulator is a research and teaching project that uses
+autoencoders to detect outliers in financial price time series. For each
+ticker, an autoencoder is trained on the daily log-returns of its closing
+prices. It learns to reconstruct the normal behavior of the market. A window
+of returns that the model reconstructs badly is flagged as an outlier, which
+means the market moved in an unusual way.
+
+## What the project does
+
+- **Data:** downloads the daily closing prices of a ticker (for example
+  `AAPL` or `PETR4.SA`) from yfinance, validates them with quality checks
+  (Great Expectations), and computes the daily log-returns.
+- **Split:** divides the log-returns in time order into train (70%),
+  validation (15%) and a held-out test set (15%). The test set is evaluated
+  only once, after training.
+- **Model:** a dense autoencoder trained on sliding windows of returns. The
+  reconstruction error of a window is its anomaly score. The anomaly threshold
+  is stored with the model.
+- **Evaluation:** the model must beat a naive baseline on the test set, and
+  its validation error must not be much larger than its training error, which
+  would indicate overfitting.
+- **Serving:** a FastAPI service that loads the trained models and returns, for
+  each window of a series, its score and whether it is an outlier. Each
+  request is routed to the model of its ticker.
+- **Delivery:** GitHub Actions workflows test the code, train the models,
+  build a Docker image with the trained models and push it to Docker Hub.
+
+## Scope and limits
+
+This is a teaching and research project. The models describe unusual
+behavior in past prices; they do not predict prices, and they are not
+investment advice. Results depend on the period and the ticker used, and
+they have not been validated for trading.
+
+The project is used in a course, so it favors clear code, documented specs
+and reproducible workflows over performance.
 
 ## Project structure
 
