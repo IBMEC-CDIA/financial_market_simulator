@@ -28,15 +28,13 @@ def test_encode_returns_latent_shape() -> None:
 
 
 def test_forward_is_deterministic_in_eval_mode() -> None:
-    """Check that two forward passes in eval mode give identical output."""
-    model = GRUAutoencoder(input_dim=10)
-    model.eval()
-    input_tensor = torch.randn(8, 10)
+    """Check that repeated eval-mode passes reconstruct the same values."""
+    gru_model = GRUAutoencoder(input_dim=6).eval()
+    window_batch = torch.randn(5, 6)
 
-    first_output = model(input_tensor)
-    second_output = model(input_tensor)
+    reconstructions = [gru_model(window_batch) for _ in range(2)]
 
-    assert torch.equal(first_output, second_output)
+    assert torch.equal(reconstructions[0], reconstructions[1])
 
 
 def test_default_sizes() -> None:
