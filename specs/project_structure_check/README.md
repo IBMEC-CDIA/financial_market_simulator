@@ -19,6 +19,7 @@ código, mas já seguem o padrão de pacote.
 | 05 | [Portões de qualidade](05-quality-gates.md) | Checagens do CI e critérios de pronto |
 | 06 | [Contrato de treinador](06-model-trainer-contract.md) | Função `build_trainer` de cada modelo e o gerenciador `TickerModelManager` |
 | 07 | [Integração por branch](07-branch-integration.md) | Arquivos que cada branch de modelo pode alterar, para o merge na `main` |
+| 08 | [Serving e build da imagem](08-serving-and-image.md) | Modelos locais carregados na subida, roteamento por ticker e build com os modelos dentro da imagem |
 
 ## Como as specs são usadas
 

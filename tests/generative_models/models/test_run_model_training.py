@@ -1,5 +1,7 @@
 """Unit tests for the command that trains the model of several tickers."""
 
+# pylint: disable=duplicate-code
+
 import json
 from unittest.mock import MagicMock, patch
 
@@ -25,6 +27,11 @@ def _make_result(model_file_path) -> MagicMock:
     result.train_evaluation_loss = 0.4
     result.validation_loss = 0.6
     result.anomaly_threshold = 1.2
+    result.window_size = 10
+    result.hidden_layer_size = 16
+    result.latent_layer_size = 4
+    result.return_train_mean = 0.001
+    result.return_train_std = 0.02
     result.test_loss = 0.3
     result.baseline_test_loss = 0.9
     result.model_file_path = model_file_path

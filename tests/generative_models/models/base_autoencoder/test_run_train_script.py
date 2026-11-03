@@ -36,6 +36,11 @@ def _configure_trainer_result(mock_trainer_class) -> None:
     result.baseline_test_loss = 0.9
     result.validation_loss = 0.3
     result.anomaly_threshold = 0.9
+    result.window_size = 10
+    result.hidden_layer_size = 16
+    result.latent_layer_size = 4
+    result.return_train_mean = 0.001
+    result.return_train_std = 0.02
     result.model_file_path = "model.pt"
 
 
@@ -118,6 +123,11 @@ def test_main_creates_trainer_and_returns_its_result(
     mock_trainer.train.return_value.baseline_test_loss = 0.9
     mock_trainer.train.return_value.validation_loss = 0.3
     mock_trainer.train.return_value.anomaly_threshold = 0.9
+    mock_trainer.train.return_value.window_size = 10
+    mock_trainer.train.return_value.hidden_layer_size = 16
+    mock_trainer.train.return_value.latent_layer_size = 4
+    mock_trainer.train.return_value.return_train_mean = 0.001
+    mock_trainer.train.return_value.return_train_std = 0.02
     mock_trainer.train.return_value.model_file_path = "model.pt"
 
     result = main(["--ticker", "AAPL", "--epochs", "2"])
@@ -195,6 +205,11 @@ def test_main_prints_a_summary_line(mock_trainer_class, capsys) -> None:
     mock_trainer.train.return_value.baseline_test_loss = 0.9
     mock_trainer.train.return_value.validation_loss = 0.3
     mock_trainer.train.return_value.anomaly_threshold = 0.9
+    mock_trainer.train.return_value.window_size = 10
+    mock_trainer.train.return_value.hidden_layer_size = 16
+    mock_trainer.train.return_value.latent_layer_size = 4
+    mock_trainer.train.return_value.return_train_mean = 0.001
+    mock_trainer.train.return_value.return_train_std = 0.02
     mock_trainer.train.return_value.model_file_path = "model.pt"
     mock_trainer_class.return_value = mock_trainer
 

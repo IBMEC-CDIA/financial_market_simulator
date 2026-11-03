@@ -2,6 +2,12 @@ name: Build
 
 on:
   workflow_dispatch:
+    inputs:
+      train_run_id:
+        description: "Run id of a successful Train workflow whose trained models are copied into the image. Leave empty to use the latest successful Train run of this branch."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -44,13 +50,33 @@ jobs:
     needs: ci-check
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
 
     env:
       IMAGE_NAME: financial-market-simulator:${{ github.sha }}
+      GH_TOKEN: ${{ github.token }}
+      TRAIN_RUN_ID: ${{ inputs.train_run_id }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Download the trained models into the build context
+        run: |
+          run_id="$TRAIN_RUN_ID"
+          if [ -z "$run_id" ]; then
+            run_id=$(gh run list               --repo "$GITHUB_REPOSITORY"               --workflow train.yml               --branch "$GITHUB_REF_NAME"               --status success               --limit 1               --json databaseId               --jq '.[0].databaseId')
+          fi
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "No successful Train run was found for the models."
+            exit 1
+          fi
+          echo "Using the trained models of run $run_id."
+          mkdir -p models
+          gh run download "$run_id"             --repo "$GITHUB_REPOSITORY"             --name trained-models             --dir models
+          ls -l models
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -62,6 +88,27 @@ jobs:
           file: ./Dockerfile
           load: true
           tags: ${{ env.IMAGE_NAME }}
+
+      - name: Smoke test the API container with the trained models
+        run: |
+          container_id=$(docker run -d -p 8000:8000 "$IMAGE_NAME")
+          trap 'docker logs "$container_id"; docker rm -f "$container_id" > /dev/null' EXIT
+          for attempt in $(seq 1 90); do
+            if curl -fsS --max-time 5 http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          loaded=$(curl -fsS --max-time 30 http://127.0.0.1:8000/models/loaded)
+          echo "$loaded"
+          test "$(printf '%s' "$loaded" | jq 'length')" -ge 1
+          ticker=$(printf '%s' "$loaded" | jq -r '.[0].ticker')
+          window=$(printf '%s' "$loaded" | jq -r '.[0].window_size')
+          body=$(jq -n --arg ticker "$ticker" --argjson window "$window" \
+            '{ticker: $ticker, log_returns: [range($window) | 0.0]}')
+          curl -fsS --max-time 30 -H 'Content-Type: application/json' \
+            -d "$body" http://127.0.0.1:8000/predictions/log-returns > /dev/null
+          echo "Prediction for $ticker succeeded."
 
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25

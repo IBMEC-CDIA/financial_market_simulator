@@ -21,3 +21,4 @@ docker
 *.pt
 *.egg-info
 src/financial_market_simulator.egg-info
+!models

@@ -9,6 +9,9 @@ from generative_models.serving.autoencoder_predictor import (
     AutoencoderModelMetadata,
     AutoencoderPredictor,
 )
+from generative_models.serving.local_autoencoder_registry import (
+    LocalAutoencoderRegistry,
+)
 from generative_models.serving.predict_autoencoder import load_predictor
 from generative_models.serving.wandb_autoencoder_registry import (
     WandbAutoencoderRegistry,
@@ -67,7 +70,10 @@ class AutoencoderModelService:
     _instance: "AutoencoderModelService | None" = None
     _instance_lock = threading.Lock()
 
-    def __init__(self, registry: WandbAutoencoderRegistry) -> None:
+    def __init__(
+        self,
+        registry: WandbAutoencoderRegistry | LocalAutoencoderRegistry,
+    ) -> None:
         """Store the registry and create the lock of the service."""
         self.registry = registry
         self.default_ticker: str | None = None
@@ -100,6 +106,17 @@ class AutoencoderModelService:
         """
         with cls._instance_lock:
             cls._instance = None
+
+    def preload_all(self) -> list[str]:
+        """Load every servable model into memory, once at startup.
+
+        Returns
+        -------
+        list[str]
+            Tickers of the loaded models.
+        """
+        with self._lock:
+            return self.registry.load_all_models()
 
     def get_predictor(
         self,
@@ -205,7 +222,9 @@ class AutoencoderModelService:
         ]
 
 
-def _build_registry_from_environment() -> WandbAutoencoderRegistry:
+def _build_registry_from_environment() -> (
+    WandbAutoencoderRegistry | LocalAutoencoderRegistry
+):
     """Create the registry from the `AUTOENCODER_*` environment variables.
 
     Returns
@@ -214,6 +233,13 @@ def _build_registry_from_environment() -> WandbAutoencoderRegistry:
         Registry configured with the project, entity and device found in
         the environment. Missing or empty variables use the defaults.
     """
+    model_directory = os.getenv("AUTOENCODER_MODEL_DIR")
+    if model_directory:
+        return LocalAutoencoderRegistry(
+            model_directory=model_directory,
+            device=os.getenv("AUTOENCODER_DEVICE") or None,
+        )
+
     return WandbAutoencoderRegistry(
         project_name=(
             os.getenv("AUTOENCODER_WANDB_PROJECT")

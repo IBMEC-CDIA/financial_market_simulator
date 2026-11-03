@@ -106,6 +106,9 @@ class AutoencoderTrainingResult:
     model_file_path: Path
     test_loss: float | None = None
     baseline_test_loss: float | None = None
+    window_size: int | None = None
+    hidden_layer_size: int | None = None
+    latent_layer_size: int | None = None
 
 
 def compute_reconstruction_scores(
@@ -590,6 +593,9 @@ class AutoencoderTrainer:
             model_file_path=self.model_file_path,
             test_loss=test_loss,
             baseline_test_loss=baseline_test_loss,
+            window_size=self.config.market_data.window_size,
+            hidden_layer_size=self.config.architecture.hidden_layer_size,
+            latent_layer_size=self.config.architecture.latent_layer_size,
         )
 
     def _evaluate_test_split(

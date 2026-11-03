@@ -15,3 +15,4 @@ wandb/
 .coverage
 coverage.xml
 junit-unit.xml
+models/*.json
