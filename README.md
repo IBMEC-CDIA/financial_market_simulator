@@ -71,7 +71,7 @@ financial_market_simulator/
 │       │   ├── vae/              # variational autoencoder models
 │       │   └── cvae/             # conditional variational autoencoder models
 │       ├── serving/              # model inference / serving utilities
-│       ├── strategy/             # trading strategy evaluation (cooldown portfolio)
+│       ├── strategy/             # trading strategy evaluation and random baseline
 │       └── mcp_server/           # exposes trained models through an MCP server
 │
 ├── scripts/                     # standalone scripts (training, data prep, etc.)
@@ -439,6 +439,13 @@ cash rate, and it compares every strategy with buy and hold. The module
 constants hold the parameters. `run_strategy_evaluation` prints the metrics
 table (final value, return, maximum drawdown and the number of trades) and
 plots the total value over time.
+
+Two more strategies are available in the same package. The fraction strategy
+(`fraction_portfolio`) trades a fraction of the position or of the cash on
+each signal, without cooldown or costs. The random baseline
+(`random_baseline`) draws random signals with the same buy and sell
+frequencies as each model, averages the metrics over many runs, and gives a
+reference to judge whether a model does better than chance.
 
 ### Ticker model manager
 
