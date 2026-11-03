@@ -71,6 +71,7 @@ financial_market_simulator/
 │       │   ├── vae/              # variational autoencoder models
 │       │   └── cvae/             # conditional variational autoencoder models
 │       ├── serving/              # model inference / serving utilities
+│       ├── strategy/             # trading strategy evaluation (cooldown portfolio)
 │       └── mcp_server/           # exposes trained models through an MCP server
 │
 ├── scripts/                     # standalone scripts (training, data prep, etc.)
@@ -428,6 +429,16 @@ The Docker Hub account and token are taken from the `dockerhub_username` and
 
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.
+
+### Strategy evaluation
+
+`generative_models.strategy.cooldown_portfolio` compares trading strategies
+built from model signals. Each signal is `buy`, `sell` or `hold`. The
+simulation applies a cooldown between trades, transaction costs, and a yearly
+cash rate, and it compares every strategy with buy and hold. The module
+constants hold the parameters. `run_strategy_evaluation` prints the metrics
+table (final value, return, maximum drawdown and the number of trades) and
+plots the total value over time.
 
 ### Ticker model manager
 
