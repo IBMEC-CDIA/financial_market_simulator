@@ -359,9 +359,11 @@ it starts. A prediction is routed to the model of the ticker in the request,
 and an unknown ticker gets a `404`. The container does not need the wandb key.
 
 The build workflow (`build.yml`) takes the models from the Train run given in
-its `train_run_id` input, or from the latest successful Train run of the
-branch. To run the image locally, put the files of a trained model in
-`models/` (the `*-overfitting.json` report and the `.pt` weights), then:
+its `train_run_id` input. When that input is empty, it downloads the latest
+registered model of each ticker in the `tickers` input from wandb, and needs
+the `wandb_api_key` input or the `WANDB_API_KEY` secret. To run the image
+locally, put the files of a trained model in `models/` (the
+`*-overfitting.json` report and the `.pt` weights), then:
 
 ```bash
 docker build -t financial-market-simulator .
@@ -417,7 +419,15 @@ It runs these jobs in order:
 
 The build workflow is also started by hand, with Run workflow. It checks that
 the CI passed for the same commit, downloads the trained models, builds the
-Docker image, smoke tests it and scans it with Trivy. It fails on fixable
+Docker image, smoke tests it and scans it with Trivy.
+
+To build without a Train run, leave `train_run_id` empty and fill in `tickers`
+(for example `PETR4.SA,AAPL`). The job then runs
+`generative_models.serving.download_latest_models`, which writes the `latest`
+model of each ticker from wandb into `models/` before the image is built. A
+ticker without a registered model fails the job before the build starts. The
+report written this way has `test_loss` and `baseline_test_loss` set to `null`,
+because the wandb artifact does not store them. It fails on fixable
 `CRITICAL` or `HIGH` vulnerabilities. Then the `push-image` job logs in to
 Docker Hub and pushes the image with the commit SHA and the `latest` tags.
 
