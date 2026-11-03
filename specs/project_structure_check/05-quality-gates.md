@@ -23,18 +23,30 @@ pronto para ele entrar no `main`.
 
 ## Checagens do treino
 
-O `train.yml` só começa depois que o CI passou para o mesmo commit. Depois
-disso roda `test-end-to-end`, `collect-data`, `train-autoencoder` e
-`evaluate`. Para o modelo novo, os jobs de treino e de avaliação chamam
-os módulos `run_train_script` e `overfitting` do próprio pacote, como nas
-specs 02 e 04.
+O `train.yml` só começa depois que o `ci-check` confirma que o CI passou
+para o mesmo commit. Depois roda `plan`, `test-end-to-end`, `collect-data`,
+`train-autoencoder` e `evaluate`, e termina em `pipeline-success`.
+
+O modelo a treinar é escolhido pelo input `model`, que o job `plan` valida
+(o pacote precisa ter `trainer_factory.py` e `overfitting.py`). Com ele, o
+treino chama `run_model_training --model <model>` e a avaliação chama
+`models/<model>/overfitting`, como nas specs 01, 04 e 06.
+
+O job `structure` do `ci.yml` verifica a estrutura de cada pacote que tem
+`trainer_factory.py`, como descrito na spec 01.
+
+Os artifacts do pipeline são `market-data-<ticker>` (preços validados, por
+ticker) e `trained-models` (pesos `.pt` e relatórios `*-overfitting.json` de
+todos os tickers).
 
 ## Definição de pronto
 
 Um modelo novo está pronto quando:
 
 1. segue a estrutura da spec 01;
-2. o comando de treino da spec 02 passa nos critérios CA-01 a CA-04;
+2. o comando de treino de vários tickers da spec 06 (`run_model_training`)
+   e o comando de um ticker da spec 02 (`run_train_script`, se existir)
+   passam nos critérios aplicáveis;
 3. o relatório da spec 04 é gravado com todas as chaves e passa nos
    critérios CA-01 a CA-04;
 4. o pylint passa sem avisos em `src/generative_models` e `tests`;

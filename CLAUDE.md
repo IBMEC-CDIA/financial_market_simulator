@@ -99,3 +99,19 @@ makes outdated: the `specs/` folder, the `docs/` folder when it exists, the
 docstrings of the changed code, and the workflow comments and names. Update
 them in the same commit as the code change. A commit that makes the README
 or a spec describe the wrong behavior, paths or commands is not complete.
+
+## Model packages
+
+Every model lives in its own package in `src/generative_models/models/`.
+Before you add or change a model, read the specs in
+`specs/project_structure_check/`:
+
+- spec 01 for the package layout and the required modules;
+- spec 06 for the trainer contract (`build_trainer`) and the shared
+  `run_model_training` command, which a model must not copy;
+- spec 07 for the files a model branch may change.
+
+Do not change shared files (workflows, `pyproject.toml`, `uv.lock`, the
+root `README.md`, `specs/`, `data/`, `serving/`, `base_autoencoder/`) from a
+model branch. The model's own documentation goes in
+`src/generative_models/models/<model>/README.md`.

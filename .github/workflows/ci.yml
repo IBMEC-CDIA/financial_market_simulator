@@ -89,6 +89,41 @@ jobs:
 
           exit "$status"
 
+      - name: Check the structure of every model package
+        run: |
+          status=0
+          for model_directory in src/generative_models/models/*/; do
+            model_name=$(basename "$model_directory")
+            if [ "$model_name" = "__pycache__" ]; then
+              continue
+            fi
+            if [ ! -f "${model_directory}trainer_factory.py" ]; then
+              echo "placeholder, not checked yet: $model_name"
+              continue
+            fi
+            for module_file in __init__.py trainer_factory.py overfitting.py; do
+              if [ -f "${model_directory}${module_file}" ]; then
+                echo "ok: models/$model_name/$module_file"
+              else
+                echo "missing: models/$model_name/$module_file"
+                status=1
+              fi
+            done
+            if head -n 1 "${model_directory}__init__.py" | grep -q '"""'; then
+              echo "ok: models/$model_name/__init__.py has a docstring"
+            else
+              echo "missing docstring: models/$model_name/__init__.py"
+              status=1
+            fi
+            if [ -f "tests/generative_models/models/$model_name/__init__.py" ]; then
+              echo "ok: tests for models/$model_name"
+            else
+              echo "missing: tests/generative_models/models/$model_name/__init__.py"
+              status=1
+            fi
+          done
+          exit "$status"
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.0.1
         with:
