@@ -24,6 +24,15 @@ Arquivo `<nome>-overfitting.json`, com estas chaves:
 | `overfitting_ratio` | número | `validation_loss / train_evaluation_loss` |
 | `test_loss` | número ou `null` | erro médio quadrático no conjunto de `test` |
 | `baseline_test_loss` | número ou `null` | erro médio quadrático de prever zero no `test` |
+| `window_size` | inteiro ou `null` | janela do modelo; usado pelo serving |
+| `hidden_layer_size` | inteiro ou `null` | camadas ocultas; usado pelo serving |
+| `latent_layer_size` | inteiro ou `null` | camada latente; usado pelo serving |
+| `return_train_mean` | número ou `null` | média de normalização do treino; usado pelo serving |
+| `return_train_std` | número ou `null` | desvio de normalização do treino; usado pelo serving |
+| `anomaly_threshold` | número ou `null` | limiar de anomalia; usado pelo serving |
+
+Os campos do serving são o que permite à API reconstruir o modelo a partir do
+relatório e do arquivo `.pt` com o mesmo nome (spec 08).
 
 ## Critérios de aprovação
 

@@ -2,6 +2,22 @@ name: Build
 
 on:
   workflow_dispatch:
+    inputs:
+      train_run_id:
+        description: "Run id of a successful Train workflow whose trained models are copied into the image. Leave empty to use the latest successful Train run of this branch."
+        required: false
+        default: ""
+        type: string
+      dockerhub_username:
+        description: "Docker Hub account name. Leave empty to use the DOCKERHUB_USERNAME secret."
+        required: false
+        default: ""
+        type: string
+      dockerhub_token:
+        description: "Docker Hub access token. Leave empty to use the DOCKERHUB_TOKEN secret. Typed values are not masked by GitHub in the form, so prefer the secret."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -44,13 +60,43 @@ jobs:
     needs: ci-check
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
 
     env:
       IMAGE_NAME: financial-market-simulator:${{ github.sha }}
+      GH_TOKEN: ${{ github.token }}
+      TRAIN_RUN_ID: ${{ inputs.train_run_id }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Download the trained models into the build context
+        run: |
+          run_id="$TRAIN_RUN_ID"
+          if [ -z "$run_id" ]; then
+            run_id=$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow train.yml \
+              --branch "$GITHUB_REF_NAME" \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')
+          fi
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "No successful Train run was found for the models."
+            exit 1
+          fi
+          echo "Using the trained models of run $run_id."
+          mkdir -p models
+          gh run download "$run_id" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name trained-models \
+            --dir models
+          ls -l models
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -62,6 +108,27 @@ jobs:
           file: ./Dockerfile
           load: true
           tags: ${{ env.IMAGE_NAME }}
+
+      - name: Smoke test the API container with the trained models
+        run: |
+          container_id=$(docker run -d -p 8000:8000 "$IMAGE_NAME")
+          trap 'docker logs "$container_id"; docker rm -f "$container_id" > /dev/null' EXIT
+          for attempt in $(seq 1 90); do
+            if curl -fsS --max-time 5 http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          loaded=$(curl -fsS --max-time 30 http://127.0.0.1:8000/models/loaded)
+          echo "$loaded"
+          test "$(printf '%s' "$loaded" | jq 'length')" -ge 1
+          ticker=$(printf '%s' "$loaded" | jq -r '.[0].ticker')
+          window=$(printf '%s' "$loaded" | jq -r '.[0].window_size')
+          body=$(jq -n --arg ticker "$ticker" --argjson window "$window" \
+            '{ticker: $ticker, log_returns: [range($window) | 0.0]}')
+          curl -fsS --max-time 30 -H 'Content-Type: application/json' \
+            -d "$body" http://127.0.0.1:8000/predictions/log-returns > /dev/null
+          echo "Prediction for $ticker succeeded."
 
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
@@ -88,12 +155,75 @@ jobs:
           printf '%s\n' "$FIXABLE_LIST" | sed '/^$/d'
           test "$FIXABLE_COUNT" -eq 0
 
+      - name: Save image to a file
+        run: docker save -o financial-market-simulator.tar "$IMAGE_NAME"
+
+      - name: Upload image file
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: financial-market-simulator.tar
+          if-no-files-found: error
+
+  push-image:
+    name: Push Docker image to Docker Hub
+    needs:
+      - ci-check
+      - build-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    env:
+      DOCKERHUB_USERNAME: ${{ inputs.dockerhub_username || secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ inputs.dockerhub_token || secrets.DOCKERHUB_TOKEN }}
+      LOCAL_IMAGE: financial-market-simulator:${{ github.sha }}
+
+    steps:
+      - name: Hide the Docker Hub token from the logs
+        run: |
+          if [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "::add-mask::$DOCKERHUB_TOKEN"
+          fi
+
+      - name: Check the Docker Hub credentials
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "Docker Hub credentials are required: fill in the dockerhub inputs or set the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets."
+            exit 1
+          fi
+          echo "Docker Hub credentials found."
+
+      - name: Download the image file
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Load the image
+        run: docker load -i financial-market-simulator.tar
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Tag and push the image
+        run: |
+          target="$DOCKERHUB_USERNAME/financial-market-simulator"
+          docker tag "$LOCAL_IMAGE" "$target:$GITHUB_SHA"
+          docker tag "$LOCAL_IMAGE" "$target:latest"
+          docker push "$target:$GITHUB_SHA"
+          docker push "$target:latest"
+
   pipeline-success:
     name: Build Run Successfully
     if: always()
     needs:
       - ci-check
       - build-image
+      - push-image
     runs-on: ubuntu-latest
 
     env:

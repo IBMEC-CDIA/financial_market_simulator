@@ -322,27 +322,33 @@ training failures stop them. The workflow needs these repository secrets:
 - `DOCKERHUB_TOKEN`: a Docker Hub access token with write permission.
 
 The image serves the trained autoencoders through the FastAPI application
-in `generative_models.serving.api`, on port `8000`. To run it locally:
+in `generative_models.serving.api`, on port `8000`. The models are part of
+the image: the build downloads the `trained-models` artifact of a successful
+Train run into `models/`, and the API loads every model of that folder when
+it starts. A prediction is routed to the model of the ticker in the request,
+and an unknown ticker gets a `404`. The container does not need the wandb key.
+
+The build workflow (`build.yml`) takes the models from the Train run given in
+its `train_run_id` input, or from the latest successful Train run of the
+branch. To run the image locally, put the files of a trained model in
+`models/` (the `*-overfitting.json` report and the `.pt` weights), then:
 
 ```bash
 docker build -t financial-market-simulator .
-docker run --rm -p 8000:8000 \
-    -e WANDB_API_KEY=... \
-    financial-market-simulator
+docker run --rm -p 8000:8000 financial-market-simulator
 ```
 
 Then open `http://127.0.0.1:8000/docs` for the interactive API docs, or
-`http://127.0.0.1:8000/health` to check the service. At startup the
-container loads the default model from wandb, so it needs `WANDB_API_KEY`
-at runtime. The `.env` file is not copied into the image, so pass the key
-with `-e` or with `--env-file .env`. The container accepts these optional
+`http://127.0.0.1:8000/health` to check the service. The image sets
+`AUTOENCODER_MODEL_DIR=/app/models`. The container accepts these optional
 variables:
 
-- `AUTOENCODER_WANDB_PROJECT`: wandb project that holds the models.
-- `AUTOENCODER_WANDB_ENTITY`: wandb entity (user or team).
+- `AUTOENCODER_MODEL_DIR`: folder with the model files. When it is set, the
+  models are read from this folder and wandb is not used.
+- `AUTOENCODER_WANDB_PROJECT` and `AUTOENCODER_WANDB_ENTITY`: used only when
+  `AUTOENCODER_MODEL_DIR` is not set.
 - `AUTOENCODER_DEVICE`: `cpu` or `cuda`. Defaults to `cuda` when available.
-- `AUTOENCODER_PRELOAD_MODEL`: `false` to skip loading the default model
-  at startup.
+- `AUTOENCODER_PRELOAD_MODEL`: `false` to skip loading the models at startup.
 
 ### Training workflow (`train.yml`)
 
@@ -380,9 +386,15 @@ It runs these jobs in order:
 ### Build workflow (`build.yml`)
 
 The build workflow is also started by hand, with Run workflow. It checks that
-the CI passed for the same commit, builds the Docker image locally and scans
-it with Trivy. It fails on fixable `CRITICAL` or `HIGH` vulnerabilities. It
-does not log in to Docker Hub and does not push the image.
+the CI passed for the same commit, downloads the trained models, builds the
+Docker image, smoke tests it and scans it with Trivy. It fails on fixable
+`CRITICAL` or `HIGH` vulnerabilities. Then the `push-image` job logs in to
+Docker Hub and pushes the image with the commit SHA and the `latest` tags.
+
+The Docker Hub account and token are taken from the `dockerhub_username` and
+`dockerhub_token` inputs of the dispatch. Leave them empty to use the
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets. For example:
+`gh workflow run build.yml -f dockerhub_username=... -f dockerhub_token=...`.
 
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.

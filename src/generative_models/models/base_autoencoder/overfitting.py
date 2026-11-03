@@ -1,5 +1,7 @@
 """Overfitting check that compares the training and validation errors."""
 
+# pylint: disable=duplicate-code
+
 import argparse
 import json
 import os
@@ -50,6 +52,12 @@ class OverfittingReport:
     overfitting_ratio: float
     test_loss: float | None = None
     baseline_test_loss: float | None = None
+    window_size: int | None = None
+    hidden_layer_size: int | None = None
+    latent_layer_size: int | None = None
+    return_train_mean: float | None = None
+    return_train_std: float | None = None
+    anomaly_threshold: float | None = None
 
 
 def build_overfitting_report(
@@ -98,6 +106,12 @@ def build_overfitting_report(
         ),
         test_loss=result.test_loss,
         baseline_test_loss=result.baseline_test_loss,
+        window_size=result.window_size,
+        hidden_layer_size=result.hidden_layer_size,
+        latent_layer_size=result.latent_layer_size,
+        return_train_mean=float(result.return_train_mean),
+        return_train_std=float(result.return_train_std),
+        anomaly_threshold=float(result.anomaly_threshold),
     )
 
 

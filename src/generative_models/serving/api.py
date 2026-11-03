@@ -61,10 +61,12 @@ ModelServiceDependency = Annotated[
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """Load the default model when the API starts.
+    """Load every model, and the default model, when the API starts.
 
-    The preload is skipped when `AUTOENCODER_PRELOAD_MODEL` is `false`.
-    A failure is logged and does not stop the API from starting.
+    All servable models are kept in memory, so each prediction is routed by
+    ticker without a download. The preload is skipped when
+    `AUTOENCODER_PRELOAD_MODEL` is `false`. A failure is logged and does not
+    stop the API from starting.
 
     Parameters
     ----------
@@ -83,11 +85,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             get_model_service,
         )
         try:
-            service_provider().get_predictor()
+            service = service_provider()
+            service.preload_all()
+            service.get_predictor()
         # pylint: disable-next=broad-exception-caught
         except Exception as preload_error:
             logger.warning(
-                "Could not preload the default model: %s",
+                "Could not preload the models: %s",
                 preload_error,
             )
 
