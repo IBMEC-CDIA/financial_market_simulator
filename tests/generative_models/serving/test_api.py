@@ -22,6 +22,7 @@ EXPECTED_PATHS = {
     "/predictions/log-returns",
     "/predictions/prices",
     "/predictions/market",
+    "/signals",
 }
 
 
