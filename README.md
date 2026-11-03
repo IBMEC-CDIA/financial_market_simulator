@@ -417,8 +417,9 @@ It runs these jobs in order:
 
 ### Build workflow (`build.yml`)
 
-The build workflow is also started by hand, with Run workflow. It checks that
-the CI passed for the same commit, downloads the trained models, builds the
+The build workflow is also started by hand, with Run workflow. It waits for the
+CI run of the same commit to finish, fails unless that run passed, then
+downloads the trained models, builds the
 Docker image, smoke tests it and scans it with Trivy.
 
 To build without a Train run, leave `train_run_id` empty and fill in `tickers`
