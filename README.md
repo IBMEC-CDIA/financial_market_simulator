@@ -386,9 +386,15 @@ It runs these jobs in order:
 ### Build workflow (`build.yml`)
 
 The build workflow is also started by hand, with Run workflow. It checks that
-the CI passed for the same commit, builds the Docker image locally and scans
-it with Trivy. It fails on fixable `CRITICAL` or `HIGH` vulnerabilities. It
-does not log in to Docker Hub and does not push the image.
+the CI passed for the same commit, downloads the trained models, builds the
+Docker image, smoke tests it and scans it with Trivy. It fails on fixable
+`CRITICAL` or `HIGH` vulnerabilities. Then the `push-image` job logs in to
+Docker Hub and pushes the image with the commit SHA and the `latest` tags.
+
+The Docker Hub account and token are taken from the `dockerhub_username` and
+`dockerhub_token` inputs of the dispatch. Leave them empty to use the
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets. For example:
+`gh workflow run build.yml -f dockerhub_username=... -f dockerhub_token=...`.
 
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.

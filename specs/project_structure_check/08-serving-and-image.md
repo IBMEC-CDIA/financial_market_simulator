@@ -54,7 +54,11 @@ ignorado.
 5. O Trivy escaneia a imagem, e o job falha em CVEs HIGH ou CRITICAL com
    correção.
 
-O build não faz login no Docker Hub e não envia a imagem.
+6. O job `push-image` baixa a imagem do job `build-image`, faz login no
+   Docker Hub e envia as tags `<usuario>/financial-market-simulator:<sha>` e
+   `:latest`. O usuário e o token vêm dos inputs `dockerhub_username` e
+   `dockerhub_token`, e na falta deles, dos secrets `DOCKERHUB_USERNAME` e
+   `DOCKERHUB_TOKEN`. O job falha se algum dos dois estiver ausente.
 
 ## Erros esperados
 
