@@ -1,7 +1,8 @@
 # 03 - Contrato dos dados de preços
 
-- **Arquivo:** `src/generative_models/data/collect_market_data.py` (produção)
-  e `src/generative_models/data/validation.py` (checagens)
+- **Arquivo:** `src/generative_models/data/collect_market_data.py` (produção),
+  `src/generative_models/data/price_dataset.py` (montagem do dataset) e
+  `src/generative_models/data/validation.py` (checagens)
 - **Arquivo de teste:** `tests/generative_models/data/test_collect_market_data.py`
   e `tests/generative_models/data/test_validation.py`
 - **Depende de:** nenhuma
@@ -40,8 +41,10 @@ O CSV só é gravado se a validação passar. As regras estão em
 
 ## Regras para o modelo
 
-- O modelo lê `log_return` e `split` do CSV. Ele não baixa preços por conta
-  própria.
+- O modelo recebe os preços já preparados. Pelo CLI de um ticker, eles vêm
+  do CSV. Pelo `run_model_training`, o `TickerModelManager` baixa e prepara
+  os preços com `build_price_dataset`, a mesma função usada pelo
+  `collect_market_data`. Os dois caminhos produzem o mesmo DataFrame.
 - O modelo não altera o conjunto de teste durante o treino. O conjunto de
   teste é usado uma única vez, na avaliação.
 - A normalização usa apenas as estatísticas do conjunto de `train`.

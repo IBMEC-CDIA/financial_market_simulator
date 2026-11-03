@@ -236,7 +236,11 @@ the required files (`pyproject.toml`, `uv.lock`, `README.md`,
 `.dockerignore`, `.trivyignore`), that the `tests` folder exists, that
 `.env` is ignored by git and Docker and never tracked, that the Dockerfile
 installs from `uv.lock`, and that `uv.lock` matches `pyproject.toml`.
-Then `lint` runs pylint. Only after `lint` passes do `unit-tests`,
+For each model package that has a `trainer_factory.py`, the same job checks
+that `trainer_factory.py`, `overfitting.py` and `__init__.py` exist, that the
+`__init__.py` has a docstring, and that
+`tests/generative_models/models/<name>/__init__.py` exists.
+Placeholder packages are skipped until they have a trainer. Then `lint` runs pylint. Only after `lint` passes do `unit-tests`,
 `end-to-end-tests` and `security` run, in parallel. `test-report` writes a
 summary of the results to the job summary page. The `collect-data` job
 starts only when every check before it passes.
@@ -343,19 +347,35 @@ variables:
 ### Training workflow (`train.yml`)
 
 The training workflow is started by hand from the Actions tab (Run workflow),
-or from the command line with `gh workflow run train.yml -f ticker=AAPL`. It
-has inputs for the ticker, the number of epochs, the learning rate and the
-window size.
+or from the command line with
+`gh workflow run train.yml -f tickers=AAPL,MSFT -f wandb_api_key=...`. Its
+inputs are:
+
+- `model`: the model package to train, for example `base_autoencoder`
+  (default). The `plan` job checks that the package has `trainer_factory.py`
+  and `overfitting.py`, so a placeholder package is refused.
+- `tickers`: comma-separated ticker symbols, for example `AAPL,MSFT,PETR4.SA`.
+  The jobs run once per ticker.
+- `wandb_api_key`: the W&B API key. It is required. When it is left empty,
+  the `WANDB_API_KEY` repository secret is used. A typed value is visible in
+  the form and in the run inputs, so prefer the secret.
+- `epochs`, `learning_rate` and `window_size`: training hyperparameters.
 
 It runs these jobs in order:
 
 1. `ci-check` stops the run unless the CI workflow passed for the same commit.
-2. `test-end-to-end` runs the end-to-end tests.
-3. `collect-data` downloads and validates the prices, then uploads them.
-4. `train-autoencoder` trains the model from `models/base_autoencoder` and
-   uploads the weights and the overfitting report. It needs the
-   `WANDB_API_KEY` repository secret to log the run.
-5. `evaluate` checks the overfitting ratio and the baseline comparison.
+2. `plan` checks the ticker symbols and the W&B key, and turns the list into
+   the matrix of the next jobs.
+3. `test-end-to-end` runs the end-to-end tests.
+4. `collect-data` downloads and validates the prices of each ticker, then
+   uploads them.
+5. `train-autoencoder` runs `models/run_model_training` for the chosen model. It
+   trains the models of all the tickers with the `TickerModelManager`, in
+   sequence, and uploads the weights and the overfitting reports as the
+   `trained-models` artifact. The key is masked in the logs.
+6. `evaluate` checks the overfitting ratio and the baseline comparison of every
+   report in that artifact.
+7. `pipeline-success` fails unless every job above succeeded.
 
 ### Build workflow (`build.yml`)
 
@@ -366,6 +386,16 @@ does not log in to Docker Hub and does not push the image.
 
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.
+
+### Ticker model manager
+
+`TickerModelManager` (`models/ticker_model_manager.py`) trains the model of
+several tickers in sequence. For each ticker it downloads and validates the
+prices, creates the trainer with the `trainer_factory` function and runs it.
+Each model package provides its `build_trainer` function in
+`trainer_factory.py`, which is the default factory when none is given. The
+contract is described in
+[`specs/project_structure_check/06-model-trainer-contract.md`](specs/project_structure_check/06-model-trainer-contract.md).
 
 ## Contributing guidelines
 

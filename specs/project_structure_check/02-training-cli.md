@@ -32,7 +32,7 @@ comando abaixo é obrigatório.
 | Argumento | Obrigatório | Uso no `train.yml` |
 |---|---|---|
 | `--ticker` | sim | ticker do treino, por exemplo `AAPL` |
-| `--price-data-path` | sim, no workflow | CSV da spec 03 |
+| `--price-data-path` | sim, no uso local | CSV da spec 03. O workflow usa o `run_model_training` (spec 06), que baixa os preços pelo manager. |
 | `--epochs` | não | número de épocas |
 | `--learning-rate` | não | taxa de aprendizado |
 | `--window-size` | não | tamanho da janela |
@@ -77,5 +77,6 @@ só com `--ticker`.
 
 ## Fora de escopo
 
-- Baixar preços (isso é feito pelo job `collect-data`, spec 03).
+- Baixar preços. Este comando usa o CSV pronto. Para vários tickers, o
+  download é feito pelo manager (spec 06).
 - Avaliar o modelo (isso é feito pelo job `evaluate`, spec 04).

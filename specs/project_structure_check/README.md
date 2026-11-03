@@ -17,12 +17,15 @@ código, mas já seguem o padrão de pacote.
 | 03 | [Contrato dos dados](03-price-data-contract.md) | CSV de preços que o treino recebe |
 | 04 | [Relatório de overfitting](04-overfitting-report.md) | JSON que o job `evaluate` lê |
 | 05 | [Portões de qualidade](05-quality-gates.md) | Checagens do CI e critérios de pronto |
+| 06 | [Contrato de treinador](06-model-trainer-contract.md) | Função `build_trainer` de cada modelo e o gerenciador `TickerModelManager` |
+| 07 | [Integração por branch](07-branch-integration.md) | Arquivos que cada branch de modelo pode alterar, para o merge na `main` |
 
 ## Como as specs são usadas
 
 - O job `structure` do `ci.yml` verifica que a pasta `tests/` existe e que
   os arquivos obrigatórios estão no repositório.
 - O `train.yml` chama, para o modelo escolhido, os módulos
-  `run_train_script` e `overfitting`. Por isso o contrato das specs 02 a 04
+  `run_model_training` (com `--model`) e `overfitting`. Por isso o contrato das specs 02 a 06
   é o que faz o workflow rodar.
+- Cada branch de modelo só altera a própria pasta, como define a spec 07.
 - Um modelo novo só é considerado pronto quando cumpre a spec 05.

@@ -3,10 +3,20 @@ name: Train
 on:
   workflow_dispatch:
     inputs:
-      ticker:
-        description: "Ticker symbol to train on"
+      model:
+        description: "Model package in generative_models.models, for example base_autoencoder"
+        required: true
+        default: "base_autoencoder"
+        type: string
+      tickers:
+        description: "Comma-separated ticker symbols, for example AAPL,MSFT,PETR4.SA"
         required: true
         default: "AAPL"
+        type: string
+      wandb_api_key:
+        description: "W&B API key. Leave empty to use the WANDB_API_KEY secret. Typed values are not masked by GitHub in the form"
+        required: false
+        default: ""
         type: string
       epochs:
         description: "Number of training epochs"
@@ -25,7 +35,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: train-${{ inputs.ticker }}
+  group: train-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -57,9 +67,82 @@ jobs:
           fi
           echo "CI passed for commit $GITHUB_SHA."
 
+  plan:
+    name: Check tickers and W&B key
+    needs: ci-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      model: ${{ steps.model.outputs.model }}
+      tickers: ${{ steps.parse.outputs.tickers }}
+      tickers_csv: ${{ steps.parse.outputs.tickers_csv }}
+
+    env:
+      MODEL_INPUT: ${{ inputs.model }}
+      TICKERS_INPUT: ${{ inputs.tickers }}
+      WANDB_KEY_INPUT: ${{ inputs.wandb_api_key }}
+      WANDB_KEY_SECRET: ${{ secrets.WANDB_API_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check the model package
+        id: model
+        run: |
+          if ! printf '%s' "$MODEL_INPUT" | grep -Eq '^[a-z][a-z0-9_]*$'; then
+            echo "Invalid model name: $MODEL_INPUT"
+            exit 1
+          fi
+          model_directory="src/generative_models/models/$MODEL_INPUT"
+          for module_file in __init__.py trainer_factory.py overfitting.py; do
+            if [ ! -f "$model_directory/$module_file" ]; then
+              echo "The model $MODEL_INPUT has no $module_file in $model_directory."
+              exit 1
+            fi
+          done
+          echo "model=$MODEL_INPUT" >> "$GITHUB_OUTPUT"
+          echo "Model to train: $MODEL_INPUT"
+
+      - name: Parse the ticker list
+        id: parse
+        run: |
+          invalid=$(printf '%s' "$TICKERS_INPUT" | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+            | grep -v '^$' \
+            | grep -E -v '^[A-Za-z0-9._^=-]+$' || true)
+          if [ -n "$invalid" ]; then
+            echo "Invalid ticker symbols:"
+            echo "$invalid"
+            exit 1
+          fi
+
+          tickers_json=$(printf '%s' "$TICKERS_INPUT" | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+            | grep -v '^$' \
+            | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          if [ "$(printf '%s' "$tickers_json" | jq 'length')" -lt 1 ]; then
+            echo "No ticker symbol was given."
+            exit 1
+          fi
+
+          tickers_csv=$(printf '%s' "$tickers_json" | jq -r 'join(",")')
+          echo "tickers=$tickers_json" >> "$GITHUB_OUTPUT"
+          echo "tickers_csv=$tickers_csv" >> "$GITHUB_OUTPUT"
+          echo "Tickers to train: $tickers_csv"
+
+      - name: Require a W&B API key
+        run: |
+          if [ -z "$WANDB_KEY_INPUT" ] && [ -z "$WANDB_KEY_SECRET" ]; then
+            echo "A W&B API key is required: fill in wandb_api_key or set the WANDB_API_KEY secret."
+            exit 1
+          fi
+          echo "A W&B API key was found."
+
   test-end-to-end:
     name: End-to-end tests
-    needs: ci-check
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -75,12 +158,19 @@ jobs:
 
   collect-data:
     name: Collect market data
-    needs: test-end-to-end
+    needs:
+      - plan
+      - test-end-to-end
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    strategy:
+      fail-fast: false
+      matrix:
+        ticker: ${{ fromJSON(needs.plan.outputs.tickers) }}
+
     env:
-      TICKER: ${{ inputs.ticker }}
+      TICKER: ${{ matrix.ticker }}
 
     steps:
       - name: Check out repository
@@ -98,19 +188,22 @@ jobs:
       - name: Upload market prices
         uses: actions/upload-artifact@v4
         with:
-          name: market-data-${{ env.TICKER }}
+          name: market-data-${{ matrix.ticker }}
           path: market-data/*.csv
           if-no-files-found: error
 
   train-autoencoder:
     name: Train autoencoder
-    needs: collect-data
+    needs:
+      - plan
+      - collect-data
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 240
 
     env:
-      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
-      TICKER: ${{ inputs.ticker }}
+      WANDB_API_KEY: ${{ inputs.wandb_api_key || secrets.WANDB_API_KEY }}
+      MODEL: ${{ needs.plan.outputs.model }}
+      TICKERS: ${{ needs.plan.outputs.tickers_csv }}
       EPOCHS: ${{ inputs.epochs }}
       LEARNING_RATE: ${{ inputs.learning_rate }}
       WINDOW_SIZE: ${{ inputs.window_size }}
@@ -119,30 +212,30 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Hide the W&B API key from the logs
+        run: |
+          if [ -n "$WANDB_API_KEY" ]; then
+            echo "::add-mask::$WANDB_API_KEY"
+          fi
+
       - name: Set up Python and uv
         uses: ./.github/actions/setup-python-uv
 
-      - name: Download market prices
-        uses: actions/download-artifact@v4
-        with:
-          name: market-data-${{ env.TICKER }}
-          path: market-data
-
-      - name: Train the autoencoder model
+      - name: Train the selected model for every ticker
         run: >
-          uv run python -m generative_models.models.base_autoencoder.run_train_script
-          --ticker "$TICKER"
-          --price-data-path "market-data/$TICKER.csv"
+          uv run python -m generative_models.models.run_model_training
+          --model "$MODEL"
+          --tickers "$TICKERS"
           --epochs "$EPOCHS"
           --learning-rate "$LEARNING_RATE"
           --window-size "$WINDOW_SIZE"
           --device cpu
           --output-directory artifacts
 
-      - name: Upload model weights and report
+      - name: Upload model weights and reports
         uses: actions/upload-artifact@v4
         with:
-          name: autoencoder-model-${{ env.TICKER }}
+          name: trained-models
           path: |
             artifacts/*.pt
             artifacts/*-overfitting.json
@@ -150,12 +243,14 @@ jobs:
 
   evaluate:
     name: Evaluate overfitting
-    needs: train-autoencoder
+    needs:
+      - plan
+      - train-autoencoder
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     env:
-      TICKER: ${{ inputs.ticker }}
+      MODEL: ${{ needs.plan.outputs.model }}
 
     steps:
       - name: Check out repository
@@ -164,22 +259,25 @@ jobs:
       - name: Set up Python and uv
         uses: ./.github/actions/setup-python-uv
 
-      - name: Download model weights and report
+      - name: Download model weights and reports
         uses: actions/download-artifact@v4
         with:
-          name: autoencoder-model-${{ env.TICKER }}
+          name: trained-models
           path: artifacts
 
-      - name: Check overfitting and baseline
-        run: >
-          uv run python -m generative_models.models.base_autoencoder.overfitting
-          --report-path artifacts/*-overfitting.json
+      - name: Check overfitting and baseline of every ticker
+        run: |
+          for report in artifacts/*-overfitting.json; do
+            uv run python -m generative_models.models."$MODEL".overfitting \
+              --report-path "$report"
+          done
 
   pipeline-success:
     name: Train Run Successfully
     if: always()
     needs:
       - ci-check
+      - plan
       - test-end-to-end
       - collect-data
       - train-autoencoder
