@@ -1,7 +1,7 @@
 [project]
 name = "financial-market-simulator"
 version = "0.1.0"
-description = ""
+description = "Autoencoders that detect outliers in financial price time series"
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
@@ -18,8 +18,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-cov",
     "pylint",
     "httpx>=0.28.1",
+    "great-expectations>=1.24.1",
 ]
 
 [build-system]
@@ -30,12 +32,12 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu130", marker = "sys_platform == 'win32'" }
+torch = { index = "pytorch-cu121", marker = "sys_platform == 'win32'" }
 
 [tool.pylint.format]
 max-line-length = 79

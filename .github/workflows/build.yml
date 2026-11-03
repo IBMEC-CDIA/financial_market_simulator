@@ -1,0 +1,275 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      train_run_id:
+        description: "Run id of a successful Train workflow whose trained models are copied into the image. Leave empty to download the latest registered models of the tickers from W&B."
+        required: false
+        default: ""
+        type: string
+      tickers:
+        description: "Comma-separated tickers whose latest registered models are downloaded from W&B, for example PETR4.SA,AAPL. Required when train_run_id is empty."
+        required: false
+        default: ""
+        type: string
+      wandb_api_key:
+        description: "W&B API key used when train_run_id is empty. Leave empty to use the WANDB_API_KEY secret. Typed values are not masked by GitHub in the form, so prefer the secret."
+        required: false
+        default: ""
+        type: string
+      dockerhub_username:
+        description: "Docker Hub account name. Leave empty to use the DOCKERHUB_USERNAME secret."
+        required: false
+        default: ""
+        type: string
+      dockerhub_token:
+        description: "Docker Hub access token. Leave empty to use the DOCKERHUB_TOKEN secret. Typed values are not masked by GitHub in the form, so prefer the secret."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci-check:
+    name: Check that CI passed for this commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Wait for the CI run of this commit
+        run: |
+          for attempt in $(seq 1 60); do
+            successful_runs=$(gh run list               --repo "$GITHUB_REPOSITORY"               --workflow ci.yml               --commit "$GITHUB_SHA"               --status success               --limit 1               --json databaseId               --jq 'length')
+            if [ "$successful_runs" -ge 1 ]; then
+              echo "CI passed for commit $GITHUB_SHA."
+              exit 0
+            fi
+            total_runs=$(gh run list               --repo "$GITHUB_REPOSITORY"               --workflow ci.yml               --commit "$GITHUB_SHA"               --json databaseId               --jq 'length')
+            pending_runs=$(gh run list               --repo "$GITHUB_REPOSITORY"               --workflow ci.yml               --commit "$GITHUB_SHA"               --json status               --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$pending_runs" -eq 0 ] && [ "$total_runs" -gt 0 ]; then
+              echo "The CI runs of commit $GITHUB_SHA finished without success."
+              exit 1
+            fi
+            if [ "$pending_runs" -eq 0 ] && [ "$attempt" -ge 6 ]; then
+              echo "No CI run was found for commit $GITHUB_SHA after 3 minutes."
+              exit 1
+            fi
+            echo "Waiting for the CI of commit $GITHUB_SHA (attempt $attempt of 60)."
+            sleep 30
+          done
+          echo "Timed out waiting for the CI of commit $GITHUB_SHA."
+          exit 1
+
+  build-image:
+    name: Build Docker image and scan for vulnerabilities
+    needs: ci-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+
+    env:
+      IMAGE_NAME: financial-market-simulator:${{ github.sha }}
+      GH_TOKEN: ${{ github.token }}
+      TRAIN_RUN_ID: ${{ inputs.train_run_id }}
+      TICKERS: ${{ inputs.tickers }}
+      WANDB_API_KEY: ${{ inputs.wandb_api_key || secrets.WANDB_API_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Hide the W&B key from the logs
+        run: |
+          if [ -n "$WANDB_API_KEY" ]; then
+            echo "::add-mask::$WANDB_API_KEY"
+          fi
+
+      - name: Check the model source inputs
+        run: |
+          if [ -z "$TRAIN_RUN_ID" ] && [ -z "$TICKERS" ]; then
+            echo "Tickers are required when train_run_id is empty: fill in the tickers input."
+            exit 1
+          fi
+          if [ -z "$TRAIN_RUN_ID" ] && [ -z "$WANDB_API_KEY" ]; then
+            echo "A W&B API key is required when train_run_id is empty: fill in wandb_api_key or set the WANDB_API_KEY secret."
+            exit 1
+          fi
+          echo "Model source inputs are valid."
+
+      - name: Download the trained models of a Train run
+        if: inputs.train_run_id != ''
+        run: |
+          echo "Using the trained models of run $TRAIN_RUN_ID."
+          mkdir -p models
+          gh run download "$TRAIN_RUN_ID"             --repo "$GITHUB_REPOSITORY"             --name trained-models             --dir models
+          ls -l models
+
+      - name: Set up Python and uv
+        if: inputs.train_run_id == ''
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Download the latest registered models from W&B
+        if: inputs.train_run_id == ''
+        run: |
+          uv run python -m generative_models.serving.download_latest_models             --tickers "$TICKERS"             --output-directory models
+          ls -l models
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: ${{ env.IMAGE_NAME }}
+
+      - name: Smoke test the API container with the trained models
+        run: |
+          container_id=$(docker run -d -p 8000:8000 "$IMAGE_NAME")
+          trap 'docker logs "$container_id"; docker rm -f "$container_id" > /dev/null' EXIT
+          for attempt in $(seq 1 90); do
+            if curl -fsS --max-time 5 http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          loaded=$(curl -fsS --max-time 30 http://127.0.0.1:8000/models/loaded)
+          echo "$loaded"
+          test "$(printf '%s' "$loaded" | jq 'length')" -ge 1
+          ticker=$(printf '%s' "$loaded" | jq -r '.[0].ticker')
+          window=$(printf '%s' "$loaded" | jq -r '.[0].window_size')
+          body=$(jq -n --arg ticker "$ticker" --argjson window "$window" \
+            '{ticker: $ticker, log_returns: [range($window) | 0.0]}')
+          curl -fsS --max-time 30 -H 'Content-Type: application/json' \
+            -d "$body" http://127.0.0.1:8000/predictions/log-returns > /dev/null
+          echo "Prediction for $ticker succeeded."
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: json
+          output: trivy-report.json
+          exit-code: "0"
+
+      - name: Fail on fixable CRITICAL or HIGH vulnerabilities
+        run: |
+          FIXABLE_LIST=$(jq -r '.Results[]? as $result | $result.Vulnerabilities[]? | select(.FixedVersion != null and .FixedVersion != "") | "\($result.Target) \(.Severity) \(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"' trivy-report.json)
+          FIXABLE_COUNT=$(printf '%s\n' "$FIXABLE_LIST" | grep -c . || true)
+          {
+            echo "## Image vulnerabilities"
+            echo ""
+            echo "Fixable CRITICAL or HIGH vulnerabilities: $FIXABLE_COUNT"
+            echo ""
+            printf '%s\n' "$FIXABLE_LIST" | sed '/^$/d; s/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$FIXABLE_LIST" | sed '/^$/d'
+          test "$FIXABLE_COUNT" -eq 0
+
+      - name: Save image to a file
+        run: docker save -o financial-market-simulator.tar "$IMAGE_NAME"
+
+      - name: Upload image file
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: financial-market-simulator.tar
+          if-no-files-found: error
+
+  push-image:
+    name: Push Docker image to Docker Hub
+    needs:
+      - ci-check
+      - build-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    env:
+      DOCKERHUB_USERNAME: ${{ inputs.dockerhub_username || secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ inputs.dockerhub_token || secrets.DOCKERHUB_TOKEN }}
+      LOCAL_IMAGE: financial-market-simulator:${{ github.sha }}
+
+    steps:
+      - name: Hide the Docker Hub token from the logs
+        run: |
+          if [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "::add-mask::$DOCKERHUB_TOKEN"
+          fi
+
+      - name: Check the Docker Hub credentials
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "Docker Hub credentials are required: fill in the dockerhub inputs or set the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets."
+            exit 1
+          fi
+          echo "Docker Hub credentials found."
+
+      - name: Download the image file
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Load the image
+        run: docker load -i financial-market-simulator.tar
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Tag and push the image
+        run: |
+          target="$DOCKERHUB_USERNAME/financial-market-simulator"
+          docker tag "$LOCAL_IMAGE" "$target:$GITHUB_SHA"
+          docker tag "$LOCAL_IMAGE" "$target:latest"
+          docker push "$target:$GITHUB_SHA"
+          docker push "$target:latest"
+
+  pipeline-success:
+    name: Build Run Successfully
+    if: always()
+    needs:
+      - ci-check
+      - build-image
+      - push-image
+    runs-on: ubuntu-latest
+
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
+
+    steps:
+      - name: Check that every job succeeded
+        run: |
+          FAILED_JOBS=$(printf '%s' "$NEEDS_JSON" | jq -r '
+            to_entries[]
+            | select(.value.result != "success")
+            | "\(.key): \(.value.result)"')
+          if [ -n "$FAILED_JOBS" ]; then
+            echo "Jobs that did not succeed:"
+            echo "$FAILED_JOBS"
+            exit 1
+          fi
+          echo "All jobs succeeded."

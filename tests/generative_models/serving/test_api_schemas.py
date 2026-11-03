@@ -1,4 +1,4 @@
-"""Unit tests for the API schemas."""
+"""Unit tests for the request and response schemas of the API."""
 
 import pytest
 from pydantic import ValidationError
@@ -12,55 +12,58 @@ from generative_models.serving.api_schemas import (
 )
 
 
-def test_log_return_request_requires_values() -> None:
-    """CA-01: empty log-returns are rejected, one value is accepted."""
+def test_empty_log_returns_are_rejected_and_one_value_is_accepted() -> None:
+    """Check the minimum length of the log-returns list."""
     with pytest.raises(ValidationError):
         LogReturnPredictionRequest(log_returns=[])
 
-    prediction_request = LogReturnPredictionRequest(log_returns=[0.01])
+    request = LogReturnPredictionRequest(log_returns=[0.01])
 
-    assert prediction_request.ticker is None
+    assert request.ticker is None
 
 
-def test_price_request_requires_two_prices() -> None:
-    """CA-02: fewer than two prices are rejected."""
+def test_single_price_is_rejected() -> None:
+    """Check that at least two prices are required."""
     with pytest.raises(ValidationError):
         PricePredictionRequest(prices=[10.0])
 
 
-@pytest.mark.parametrize("prices", [[10.0, 0.0, 11.0], [10.0, -1.0]])
-def test_price_request_requires_positive_prices(prices: list[float]) -> None:
-    """CA-03: zero or negative prices are rejected."""
+@pytest.mark.parametrize(
+    "prices",
+    [[10.0, 0.0, 11.0], [10.0, -1.0]],
+)
+def test_non_positive_prices_are_rejected(prices: list[float]) -> None:
+    """Check that every price must be strictly positive."""
     with pytest.raises(ValidationError):
         PricePredictionRequest(prices=prices)
 
 
-def test_window_response_optional_fields_default_to_none() -> None:
-    """CA-04: date and price are serialized as None when omitted."""
-    window_response = WindowPredictionResponse(
+def test_window_without_market_fields_serializes_them_as_null() -> None:
+    """Check that the market fields default to null."""
+    window = WindowPredictionResponse(
         window_end_index=4,
-        reconstruction_score=0.5,
+        reconstruction_score=0.1,
         is_outlier=False,
     )
 
-    serialized_window = window_response.model_dump()
+    serialized_window = window.model_dump()
 
     assert serialized_window["window_end_date"] is None
     assert serialized_window["close_price"] is None
 
 
-def test_reload_request_without_ticker() -> None:
-    """CA-05: ReloadRequest is valid without a ticker."""
-    assert ReloadRequest().ticker is None
+def test_reload_request_accepts_an_empty_body() -> None:
+    """Check that the ticker is optional in the reload request."""
+    request = ReloadRequest()
+
+    assert request.ticker is None
 
 
-def test_schemas_document_examples_and_descriptions() -> None:
-    """CA-06: request examples and metadata descriptions are present."""
+def test_json_schema_has_examples_and_field_descriptions() -> None:
+    """Check the OpenAPI information of the request and response schemas."""
     price_schema = PricePredictionRequest.model_json_schema()
     metadata_schema = ModelMetadataResponse.model_json_schema()
 
     assert "examples" in price_schema
-    assert all(
-        "description" in field_schema
-        for field_schema in metadata_schema["properties"].values()
-    )
+    for field_name, field_schema in metadata_schema["properties"].items():
+        assert "description" in field_schema, field_name

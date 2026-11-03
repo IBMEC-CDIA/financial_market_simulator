@@ -1,17 +1,37 @@
-"""Request and response schemas of the autoencoder REST API."""
+"""Request and response schemas of the autoencoder prediction API."""
 
-from datetime import date
-from typing import Annotated
+from datetime import UTC, date, datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
+
+SAMPLE_LOG_RETURNS = [
+    0.01,
+    -0.02,
+    0.005,
+    0.0,
+    0.013,
+    -0.04,
+    0.002,
+    0.01,
+    -0.007,
+    0.003,
+    0.02,
+    -0.01,
+]
 
 TickerField = Annotated[
     str | None,
     Field(
         default=None,
         description=(
-            "Ticker of the model to use. When omitted, the default "
-            "model is used."
+            "Ticker of the model to use. When omitted, the default model "
+            "is used."
         ),
         examples=["PETR4.SA"],
     ),
@@ -19,28 +39,57 @@ TickerField = Annotated[
 
 
 class HealthResponse(BaseModel):
-    """Liveness information of the API."""
+    """Status of the service and of the models in memory.
 
-    status: str = Field(description="Service status.", examples=["ok"])
+    Parameters
+    ----------
+    status : str
+        Always `"ok"` while the service is up.
+    default_ticker : str | None
+        Ticker of the default model, or `None` if none is loaded yet.
+    loaded_tickers : list[str]
+        Tickers of the models currently in memory.
+    """
+
+    status: str = Field(
+        description="Service status. It is `ok` while the API is up.",
+        examples=["ok"],
+    )
     default_ticker: str | None = Field(
-        description="Ticker of the default model, if loaded.",
+        description="Ticker of the default model, or null if none is loaded.",
         examples=["PETR4.SA"],
     )
     loaded_tickers: list[str] = Field(
-        description="Tickers of the models kept in memory.",
+        description="Tickers of the models currently in memory.",
         examples=[["PETR4.SA", "AAPL"]],
     )
 
 
 class ModelMetadataResponse(BaseModel):
-    """Training information of a loaded model."""
+    """Metadata of a trained autoencoder used for inference.
+
+    Parameters
+    ----------
+    ticker : str
+        Ticker symbol the model was trained on.
+    artifact_name : str
+        Versioned name of the wandb artifact.
+    window_size : int
+        Number of log-returns in each window.
+    return_train_mean : float
+        Mean of the training log-returns.
+    return_train_std : float
+        Standard deviation of the training log-returns.
+    anomaly_threshold : float
+        Reconstruction score above which a window is an outlier.
+    """
 
     ticker: str = Field(
-        description="Ticker the model was trained on.",
+        description="Ticker symbol the model was trained on.",
         examples=["PETR4.SA"],
     )
     artifact_name: str = Field(
-        description="Versioned wandb artifact name.",
+        description="Versioned name of the wandb artifact.",
         examples=["simple-autoencoder-petr4.sa:v2"],
     )
     window_size: int = Field(
@@ -53,148 +102,199 @@ class ModelMetadataResponse(BaseModel):
     )
     return_train_std: float = Field(
         description="Standard deviation of the training log-returns.",
-        examples=[0.021],
+        examples=[0.0213],
     )
     anomaly_threshold: float = Field(
-        description="Reconstruction score above which a window is an "
-        "outlier.",
-        examples=[1.85],
+        description=(
+            "Reconstruction score above which a window is an outlier."
+        ),
+        examples=[0.0051],
     )
 
 
 class AvailableModelResponse(BaseModel):
-    """Servable artifact stored in wandb."""
+    """A model artifact that can be loaded from wandb.
+
+    Parameters
+    ----------
+    artifact_name : str
+        Versioned name of the artifact.
+    ticker : str
+        Ticker symbol the model was trained on.
+    created_at : str
+        Creation time of the artifact, as reported by wandb.
+    """
 
     artifact_name: str = Field(
-        description="Versioned wandb artifact name.",
-        examples=["simple-autoencoder-aapl:v3"],
+        description="Versioned name of the wandb artifact.",
+        examples=["simple-autoencoder-petr4.sa:v2"],
     )
     ticker: str = Field(
-        description="Ticker of the model.",
-        examples=["AAPL"],
+        description="Ticker symbol the model was trained on.",
+        examples=["PETR4.SA"],
     )
     created_at: str = Field(
-        description="Creation timestamp of the artifact.",
-        examples=["2026-10-20T18:57:02Z"],
+        description="Creation time of the artifact, as reported by wandb.",
+        examples=["2026-09-15T18:30:00"],
     )
 
 
 class ReloadRequest(BaseModel):
-    """Body of a model reload request."""
+    """Body of a request to download a model again.
 
-    model_config = ConfigDict(
-        json_schema_extra={"examples": [{"ticker": "PETR4.SA"}, {}]}
-    )
+    Parameters
+    ----------
+    ticker : str | None
+        Ticker to reload. When omitted, the latest model of any ticker is
+        loaded and becomes the default model.
+    """
 
     ticker: TickerField
 
-
-class LogReturnPredictionRequest(BaseModel):
-    """Body of a prediction over raw log-returns."""
-
     model_config = ConfigDict(
         json_schema_extra={
-            "examples": [
-                {
-                    "ticker": "PETR4.SA",
-                    "log_returns": [
-                        0.012,
-                        -0.004,
-                        0.003,
-                        -0.021,
-                        0.008,
-                        0.001,
-                        -0.006,
-                        0.015,
-                        -0.002,
-                        0.004,
-                        -0.085,
-                        0.007,
-                    ],
-                }
-            ]
-        }
+            "examples": [{"ticker": "PETR4.SA"}, {}],
+        },
     )
+
+
+class LogReturnPredictionRequest(BaseModel):
+    """Body of a request to score a series of log-returns.
+
+    Parameters
+    ----------
+    ticker : str | None
+        Ticker of the model to use. The default model is used when
+        omitted.
+    log_returns : list[float]
+        Consecutive log-returns, oldest first. It must contain at least
+        one value, and at least `window_size` values in practice.
+    """
 
     ticker: TickerField
     log_returns: list[float] = Field(
         min_length=1,
-        description="Daily log-returns in chronological order.",
-        examples=[[0.012, -0.004, 0.003]],
+        description=(
+            "Consecutive log-returns, oldest first. The model's window "
+            "size sets the minimum number of values."
+        ),
+        examples=[SAMPLE_LOG_RETURNS],
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"ticker": "PETR4.SA", "log_returns": SAMPLE_LOG_RETURNS},
+            ],
+        },
     )
 
 
 class PricePredictionRequest(BaseModel):
-    """Body of a prediction over a price series."""
+    """Body of a request to score a series of closing prices.
+
+    Parameters
+    ----------
+    ticker : str | None
+        Ticker of the model to use. The default model is used when
+        omitted.
+    prices : list[float]
+        Positive closing prices, oldest first. It must contain at least
+        two values.
+    """
+
+    ticker: TickerField
+    prices: list[Annotated[float, Field(gt=0)]] = Field(
+        min_length=2,
+        description=(
+            "Positive closing prices, oldest first. At least two values "
+            "are required."
+        ),
+        examples=[[10.0, 10.2, 10.1, 10.4, 10.3, 10.5]],
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
             "examples": [
                 {
                     "ticker": "PETR4.SA",
-                    "prices": [
-                        38.1,
-                        38.4,
-                        38.2,
-                        38.6,
-                        37.9,
-                        38.3,
-                        38.5,
-                        38.1,
-                        38.7,
-                        38.6,
-                        38.9,
-                        35.2,
-                    ],
-                }
-            ]
-        }
-    )
-
-    ticker: TickerField
-    prices: list[Annotated[float, Field(gt=0)]] = Field(
-        min_length=2,
-        description="Strictly positive prices in chronological order.",
-        examples=[[38.1, 38.4, 38.2]],
+                    "prices": [10.0, 10.2, 10.1, 10.4, 10.3, 10.5],
+                },
+            ],
+        },
     )
 
 
 class WindowPredictionResponse(BaseModel):
-    """Outcome of a single window."""
+    """Score of one window of the series.
+
+    Parameters
+    ----------
+    window_end_index : int
+        Index of the last log-return of the window.
+    window_end_date : date | None
+        Date of the window's price. Only set by the market data route.
+    close_price : float | None
+        Closing price of the window's date. Only set by the market data
+        route.
+    reconstruction_score : float
+        Mean squared reconstruction error of the window.
+    is_outlier : bool
+        `True` when the score is above the anomaly threshold.
+    """
 
     window_end_index: int = Field(
         description="Index of the last log-return of the window.",
-        examples=[9],
+        examples=[4],
     )
     window_end_date: date | None = Field(
         default=None,
-        description="Date where the window ends (market route only).",
+        description=(
+            "Date of the window's price. Only filled by the market data "
+            "route; null otherwise."
+        ),
         examples=["2026-09-14"],
     )
     close_price: float | None = Field(
         default=None,
-        description="Closing price where the window ends (market route "
-        "only).",
-        examples=[38.6],
+        description=(
+            "Closing price of the window's date. Only filled by the market "
+            "data route; null otherwise."
+        ),
+        examples=[41.25],
     )
     reconstruction_score: float = Field(
         description="Mean squared reconstruction error of the window.",
-        examples=[0.42],
+        examples=[0.0031],
     )
     is_outlier: bool = Field(
-        description="Whether the score exceeds the anomaly threshold.",
+        description="True when the score is above the anomaly threshold.",
         examples=[False],
     )
 
 
 class PredictionResponse(BaseModel):
-    """Outcome of a prediction request."""
+    """Outlier detection result for a whole series.
+
+    Parameters
+    ----------
+    model : ModelMetadataResponse
+        Metadata of the model that made the prediction.
+    number_of_windows : int
+        Total number of windows scored.
+    number_of_outliers : int
+        Number of windows flagged as outliers.
+    outlier_rate : float
+        Fraction of windows flagged as outliers.
+    windows : list[WindowPredictionResponse]
+        Score of each window, in chronological order.
+    """
 
     model: ModelMetadataResponse = Field(
-        description="Model used for the prediction.",
+        description="Metadata of the model that made the prediction.",
     )
     number_of_windows: int = Field(
-        description="Number of scored windows.",
+        description="Total number of windows scored.",
         examples=[8],
     )
     number_of_outliers: int = Field(
@@ -206,14 +306,90 @@ class PredictionResponse(BaseModel):
         examples=[0.125],
     )
     windows: list[WindowPredictionResponse] = Field(
-        description="Per-window outcomes in chronological order.",
+        description="Score of each window, in chronological order.",
     )
 
 
 class ErrorResponse(BaseModel):
-    """Error payload of every documented failure."""
+    """Body of every documented error response.
+
+    Parameters
+    ----------
+    detail : str
+        Human-readable description of the error.
+    """
 
     detail: str = Field(
-        description="Human-readable error message.",
-        examples=["No model loaded for ticker 'AAPL'."],
+        description="Human-readable description of the error.",
+        examples=["No model loaded for ticker 'AAPL'. Call load_model first."],
     )
+
+
+class SignalItem(BaseModel):
+    """Trading suggestion of one loaded asset.
+
+    Parameters
+    ----------
+    symbol : str
+        Ticker symbol in upper case, for example `"AAPL"`.
+    action : Literal["buy", "sell", "hold"]
+        Suggested action.
+    confidence : float
+        Confidence of the suggestion, between 0 and 1 inclusive.
+    generated_at : datetime
+        Moment the suggestion was generated, in UTC.
+    model : str | None
+        Name of the model that produced the suggestion, up to 60 characters.
+    reason : str | None
+        Plain explanation based only on the model numbers, up to 280
+        characters.
+    """
+
+    symbol: str = Field(
+        min_length=1,
+        description="Ticker symbol in upper case.",
+        examples=["AAPL"],
+    )
+    action: Literal["buy", "sell", "hold"] = Field(
+        description="Suggested action.",
+        examples=["hold"],
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Confidence of the suggestion, between 0 and 1.",
+        examples=[0.75],
+    )
+    generated_at: datetime = Field(
+        description="Moment the suggestion was generated, in UTC.",
+        examples=["2026-11-02T12:00:00Z"],
+    )
+    model: str | None = Field(
+        default=None,
+        max_length=60,
+        description="Name of the model that produced the suggestion.",
+        examples=["simple-autoencoder-aapl"],
+    )
+    reason: str | None = Field(
+        default=None,
+        max_length=280,
+        description="Plain explanation based only on the model numbers.",
+        examples=[
+            "Janela de 10 dias com erro de reconstrucao acima do limite."
+        ],
+    )
+
+    @field_validator("symbol")
+    @classmethod
+    def symbol_in_upper_case(cls, value: str) -> str:
+        """Store the ticker in upper case."""
+        return value.upper()
+
+    @field_validator("generated_at")
+    @classmethod
+    def generated_at_in_utc(cls, value: datetime) -> datetime:
+        """Require a timezone and convert the moment to UTC."""
+        if value.tzinfo is None:
+            raise ValueError("generated_at must include a timezone.")
+
+        return value.astimezone(UTC)

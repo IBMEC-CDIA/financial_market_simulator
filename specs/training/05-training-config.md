@@ -1,7 +1,7 @@
 # 05 - Configuração do treino
 
-- **Arquivo:** `src/generative_models/models/autoencoder/config.py`
-- **Arquivo de teste:** `tests/generative_models/models/autoencoder/test_config.py`
+- **Arquivo:** `src/generative_models/models/base_autoencoder/config.py`
+- **Arquivo de teste:** `tests/generative_models/models/base_autoencoder/test_config.py`
 - **Depende de:** nenhuma
 - **Situação:** a implementar
 
@@ -76,7 +76,7 @@ class AutoencoderTrainingConfig:
         ...
 ```
 
-O pacote `generative_models.models.autoencoder` deve reexportar, no
+O pacote `generative_models.models.base_autoencoder` deve reexportar, no
 seu `__init__.py`, as cinco classes desta spec.
 
 ## Comportamento
