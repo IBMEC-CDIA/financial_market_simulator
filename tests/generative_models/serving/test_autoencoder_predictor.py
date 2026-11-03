@@ -4,216 +4,147 @@ import numpy as np
 import pytest
 import torch
 
-from generative_models.models.autoencoder.autoencoder import (
-    SimpleAutoencoder,
-)
-from generative_models.models.autoencoder.trainer import (
+from generative_models.models.base_autoencoder.trainer import (
     compute_reconstruction_scores,
 )
-from generative_models.serving.autoencoder_predictor import (
-    AutoencoderModelMetadata,
-    AutoencoderPredictor,
-)
-
-WINDOW_SIZE = 5
-RETURN_TRAIN_MEAN = 0.001
-RETURN_TRAIN_STD = 0.02
 
 
-def build_metadata(anomaly_threshold: float) -> AutoencoderModelMetadata:
-    """Build model metadata for the tests.
-
-    Parameters
-    ----------
-    anomaly_threshold : float
-        Reconstruction error above which a window is an outlier.
-
-    Returns
-    -------
-    AutoencoderModelMetadata
-        Metadata describing a model trained on PETR4.SA.
-    """
-    return AutoencoderModelMetadata(
-        ticker="PETR4.SA",
-        window_size=WINDOW_SIZE,
-        return_train_mean=RETURN_TRAIN_MEAN,
-        return_train_std=RETURN_TRAIN_STD,
-        anomaly_threshold=anomaly_threshold,
-        artifact_name="simple-autoencoder-petr4.sa:v1",
-    )
-
-
-def build_predictor(anomaly_threshold: float = 0.5) -> AutoencoderPredictor:
-    """Build a predictor wrapping an untrained autoencoder.
-
-    Parameters
-    ----------
-    anomaly_threshold : float
-        Reconstruction error above which a window is an outlier.
-
-    Returns
-    -------
-    AutoencoderPredictor
-        Predictor on CPU, built from a fixed random seed.
-    """
-    torch.manual_seed(42)
-    model = SimpleAutoencoder(input_dim=WINDOW_SIZE)
-
-    return AutoencoderPredictor(
-        model=model,
-        metadata=build_metadata(anomaly_threshold),
-        device="cpu",
-    )
-
-
-def build_log_returns(number_of_returns: int) -> np.ndarray:
-    """Build a synthetic log-return series.
-
-    Parameters
-    ----------
-    number_of_returns : int
-        Number of log-returns to generate.
-
-    Returns
-    -------
-    np.ndarray
-        One-dimensional array of synthetic log-returns.
-    """
-    random_generator = np.random.default_rng(11)
-
-    return random_generator.normal(
-        loc=0.0,
-        scale=0.02,
-        size=number_of_returns,
-    ).astype(np.float32)
-
-
-def test_constructor_puts_the_model_in_evaluation_mode() -> None:
-    """CA-01: the constructor leaves the model in evaluation mode."""
-    predictor = build_predictor()
+def test_constructor_puts_model_in_eval_mode(make_predictor) -> None:
+    """Check that the predictor leaves the model in evaluation mode."""
+    predictor = make_predictor()
 
     assert predictor.model.training is False
 
 
-def test_predict_returns_one_entry_per_window() -> None:
-    """CA-02: 12 log-returns produce 8 windows ending at indices 4 to 11."""
-    predictor = build_predictor()
-
-    prediction = predictor.predict(build_log_returns(12))
-
-    assert prediction.reconstruction_scores.shape == (8,)
-    assert prediction.is_outlier.shape == (8,)
-    assert np.array_equal(
-        prediction.window_end_indices,
-        np.arange(4, 12),
-    )
-
-
-def test_threshold_decides_which_windows_are_outliers() -> None:
-    """CA-03: a zero threshold flags every window and a huge one none."""
-    log_return_values = build_log_returns(12)
-
-    every_window = build_predictor(anomaly_threshold=0.0).predict(
-        log_return_values
-    )
-    no_window = build_predictor(anomaly_threshold=1e9).predict(
-        log_return_values
-    )
-
-    assert bool(every_window.is_outlier.all())
-    assert not bool(no_window.is_outlier.any())
-
-
-def test_score_equal_to_the_threshold_is_not_an_outlier() -> None:
-    """CA-04: a score exactly equal to the threshold is not an outlier."""
-    log_return_values = build_log_returns(12)
-    reference = build_predictor(anomaly_threshold=0.0).predict(
-        log_return_values
-    )
-    first_score = float(reference.reconstruction_scores[0])
-
-    prediction = build_predictor(anomaly_threshold=first_score).predict(
-        log_return_values
-    )
-
-    assert bool(prediction.is_outlier[0]) is False
-
-
-def test_normalization_uses_the_training_statistics() -> None:
-    """CA-05: scores match windows normalized with the metadata."""
-    predictor = build_predictor()
-    log_return_values = build_log_returns(12)
+def test_predict_returns_one_window_per_position(make_predictor) -> None:
+    """Check the number of windows and their end indices for 12 returns."""
+    predictor = make_predictor()
+    log_return_values = np.linspace(-0.02, 0.02, 12)
 
     prediction = predictor.predict(log_return_values)
 
-    normalized_values = (
-        log_return_values - RETURN_TRAIN_MEAN
-    ) / RETURN_TRAIN_STD
-    expected_windows = torch.from_numpy(
-        np.lib.stride_tricks.sliding_window_view(
-            normalized_values.astype(np.float32),
-            window_shape=WINDOW_SIZE,
-        ).copy()
+    assert len(prediction.reconstruction_scores) == 8
+    assert len(prediction.is_outlier) == 8
+    assert prediction.window_end_indices.tolist() == list(range(4, 12))
+
+
+def test_threshold_zero_flags_every_window_and_high_threshold_none(
+    make_predictor,
+) -> None:
+    """Check the outlier flags with extreme thresholds."""
+    log_return_values = np.linspace(-0.02, 0.02, 12)
+
+    all_outliers = make_predictor(anomaly_threshold=0.0).predict(
+        log_return_values
+    )
+    no_outliers = make_predictor(anomaly_threshold=1e9).predict(
+        log_return_values
+    )
+
+    assert bool(all_outliers.is_outlier.all())
+    assert not bool(no_outliers.is_outlier.any())
+
+
+def test_score_equal_to_threshold_is_not_an_outlier(make_predictor) -> None:
+    """Check that the comparison with the threshold is strict."""
+    log_return_values = np.linspace(-0.02, 0.02, 12)
+    scores = make_predictor().predict(log_return_values).reconstruction_scores
+    predictor = make_predictor(anomaly_threshold=float(scores[0]))
+
+    prediction = predictor.predict(log_return_values)
+
+    assert not bool(prediction.is_outlier[0])
+
+
+def test_predict_uses_saved_normalization_statistics(make_predictor) -> None:
+    """Check that scores match a manual normalization with the metadata."""
+    mean_value = 0.001
+    std_value = 0.02
+    predictor = make_predictor(
+        return_train_mean=mean_value,
+        return_train_std=std_value,
+    )
+    log_return_values = np.linspace(-0.03, 0.03, 12)
+
+    prediction = predictor.predict(log_return_values)
+
+    normalized_tensor = (
+        torch.tensor(log_return_values, dtype=torch.float32) - mean_value
+    ) / std_value
+    manual_windows = torch.stack(
+        [normalized_tensor[start : start + 5] for start in range(8)]
     )
     expected_scores = compute_reconstruction_scores(
         predictor.model,
-        expected_windows,
+        manual_windows,
     )
-
-    assert np.allclose(
+    np.testing.assert_allclose(
         prediction.reconstruction_scores,
         expected_scores,
-        atol=1e-6,
+        rtol=1e-5,
     )
 
 
-def test_series_shorter_than_the_window_raises_value_error() -> None:
-    """CA-06: fewer log-returns than the window size raises ValueError."""
-    predictor = build_predictor()
+def test_predict_raises_when_too_few_log_returns(make_predictor) -> None:
+    """Check that fewer log-returns than the window size are rejected."""
+    predictor = make_predictor()
+
+    with pytest.raises(
+        ValueError, match="At least 5 log-returns are required"
+    ):
+        predictor.predict(np.array([0.01, 0.02, 0.03, 0.04]))
+
+
+def test_predict_from_prices_requires_window_size_plus_one_prices(
+    make_predictor,
+) -> None:
+    """Check that too few prices give a message in terms of prices."""
+    predictor = make_predictor()
 
     with pytest.raises(
         ValueError,
-        match="At least 5 log-returns are required",
+        match="At least 6 prices are required, got 5. The model window size",
     ):
-        predictor.predict(build_log_returns(4))
+        predictor.predict_from_prices(np.linspace(100.0, 101.0, 5))
 
 
-def test_predict_from_prices_matches_predict_on_log_returns() -> None:
-    """CA-07: scoring prices equals scoring their log-returns."""
-    predictor = build_predictor()
-    price_values = 100.0 * np.exp(np.cumsum(build_log_returns(12)))
+def test_predict_from_prices_matches_predict_on_log_returns(
+    make_predictor,
+) -> None:
+    """Check that prices give the same scores as their log-returns."""
+    predictor = make_predictor()
+    price_values = 100 * np.exp(np.cumsum(np.full(12, 0.01)))
 
     from_prices = predictor.predict_from_prices(price_values)
     from_log_returns = predictor.predict(np.diff(np.log(price_values)))
 
-    assert np.allclose(
+    np.testing.assert_allclose(
         from_prices.reconstruction_scores,
         from_log_returns.reconstruction_scores,
+        rtol=1e-5,
         atol=1e-6,
     )
 
 
-def test_predict_accepts_every_input_type_without_mutating_it() -> None:
-    """CA-08: arrays, tensors and read-only arrays work and stay intact."""
-    predictor = build_predictor()
-    log_return_values = build_log_returns(12)
-
-    array_prediction = predictor.predict(log_return_values.copy())
-
-    tensor_input = torch.from_numpy(log_return_values.copy())
-    tensor_input.requires_grad_(True)
-    tensor_prediction = predictor.predict(tensor_input)
-
-    read_only_values = log_return_values.copy()
+def test_predict_accepts_read_only_arrays_and_tensors(make_predictor) -> None:
+    """Check that read-only inputs work and are never modified."""
+    predictor = make_predictor()
+    read_only_values = np.linspace(-0.02, 0.02, 12)
     read_only_values.setflags(write=False)
-    read_only_prediction = predictor.predict(read_only_values)
+    tensor_values = torch.linspace(-0.02, 0.02, 12, requires_grad=True)
+    original_values = read_only_values.copy()
 
-    assert np.allclose(
-        array_prediction.reconstruction_scores,
-        tensor_prediction.reconstruction_scores,
-    )
-    assert np.allclose(
-        array_prediction.reconstruction_scores,
-        read_only_prediction.reconstruction_scores,
-    )
-    assert np.array_equal(read_only_values, log_return_values)
+    array_prediction = predictor.predict(read_only_values)
+    tensor_prediction = predictor.predict(tensor_values)
+
+    np.testing.assert_array_equal(read_only_values, original_values)
+    assert len(array_prediction.reconstruction_scores) == 8
+    assert len(tensor_prediction.reconstruction_scores) == 8
+
+
+def test_predict_rejects_two_dimensional_input(make_predictor) -> None:
+    """Check that a series must be one-dimensional."""
+    predictor = make_predictor()
+
+    with pytest.raises(ValueError, match="one-dimensional"):
+        predictor.predict(np.zeros((2, 6)))

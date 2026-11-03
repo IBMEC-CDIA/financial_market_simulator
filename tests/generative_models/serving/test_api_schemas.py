@@ -1,4 +1,4 @@
-"""Unit tests for the REST API schemas."""
+"""Unit tests for the request and response schemas of the API."""
 
 import pytest
 from pydantic import ValidationError
@@ -12,8 +12,8 @@ from generative_models.serving.api_schemas import (
 )
 
 
-def test_log_returns_require_at_least_one_value() -> None:
-    """CA-01: an empty log-return list is rejected, a single one is not."""
+def test_empty_log_returns_are_rejected_and_one_value_is_accepted() -> None:
+    """Check the minimum length of the log-returns list."""
     with pytest.raises(ValidationError):
         LogReturnPredictionRequest(log_returns=[])
 
@@ -22,8 +22,8 @@ def test_log_returns_require_at_least_one_value() -> None:
     assert request.ticker is None
 
 
-def test_prices_require_at_least_two_values() -> None:
-    """CA-02: a single price cannot produce a log-return."""
+def test_single_price_is_rejected() -> None:
+    """Check that at least two prices are required."""
     with pytest.raises(ValidationError):
         PricePredictionRequest(prices=[10.0])
 
@@ -32,17 +32,17 @@ def test_prices_require_at_least_two_values() -> None:
     "prices",
     [[10.0, 0.0, 11.0], [10.0, -1.0]],
 )
-def test_prices_must_be_strictly_positive(prices: list[float]) -> None:
-    """CA-03: zero and negative prices are rejected."""
+def test_non_positive_prices_are_rejected(prices: list[float]) -> None:
+    """Check that every price must be strictly positive."""
     with pytest.raises(ValidationError):
         PricePredictionRequest(prices=prices)
 
 
-def test_window_response_defaults_market_fields_to_none() -> None:
-    """CA-04: the date and price of a window default to null."""
+def test_window_without_market_fields_serializes_them_as_null() -> None:
+    """Check that the market fields default to null."""
     window = WindowPredictionResponse(
         window_end_index=4,
-        reconstruction_score=0.5,
+        reconstruction_score=0.1,
         is_outlier=False,
     )
 
@@ -53,21 +53,17 @@ def test_window_response_defaults_market_fields_to_none() -> None:
 
 
 def test_reload_request_accepts_an_empty_body() -> None:
-    """CA-05: a reload without a ticker targets the default model."""
+    """Check that the ticker is optional in the reload request."""
     request = ReloadRequest()
 
     assert request.ticker is None
 
 
-def test_schemas_are_documented_for_openapi() -> None:
-    """CA-06: bodies carry examples and metadata fields descriptions."""
+def test_json_schema_has_examples_and_field_descriptions() -> None:
+    """Check the OpenAPI information of the request and response schemas."""
     price_schema = PricePredictionRequest.model_json_schema()
-
-    assert "examples" in price_schema
-
     metadata_schema = ModelMetadataResponse.model_json_schema()
 
-    assert all(
-        "description" in field_schema
-        for field_schema in metadata_schema["properties"].values()
-    )
+    assert "examples" in price_schema
+    for field_name, field_schema in metadata_schema["properties"].items():
+        assert "description" in field_schema, field_name

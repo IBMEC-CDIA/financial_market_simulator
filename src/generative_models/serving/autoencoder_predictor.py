@@ -1,39 +1,39 @@
-"""Inference wrapper around a trained log-return autoencoder."""
+"""Inference wrapper that scores new data with a trained autoencoder."""
 
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 
-from generative_models.common.normalization import normalize_series
-from generative_models.models.autoencoder.autoencoder import (
+from generative_models.data.normalization import normalize_series
+from generative_models.models.base_autoencoder.autoencoder import (
     SimpleAutoencoder,
 )
-from generative_models.models.autoencoder.trainer import (
+from generative_models.models.base_autoencoder.trainer import (
     compute_reconstruction_scores,
 )
 
 
 @dataclass
 class AutoencoderModelMetadata:
-    """Everything inference needs to know about a trained model.
+    """Information saved with a trained autoencoder and needed for inference.
 
     Parameters
     ----------
     ticker : str
         Ticker symbol the model was trained on.
     window_size : int
-        Number of consecutive log-returns per window, which is also
-        the input dimension of the model.
+        Number of log-returns in each window.
     return_train_mean : float
-        Mean of the training log-returns, used to normalize new data
-        with the same statistics seen during training.
+        Mean of the training log-returns, used for normalization.
     return_train_std : float
-        Standard deviation of the training log-returns.
+        Standard deviation of the training log-returns, used for
+        normalization.
     anomaly_threshold : float
-        Reconstruction error above which a window is an outlier.
+        Reconstruction score above which a window is an outlier.
     artifact_name : str
-        Versioned name of the artifact the model came from.
+        Versioned name of the wandb artifact, for example
+        `"simple-autoencoder-petr4.sa:v2"`.
     """
 
     ticker: str
@@ -46,18 +46,19 @@ class AutoencoderModelMetadata:
 
 @dataclass
 class AutoencoderPrediction:
-    """Outcome of scoring a log-return series window by window.
+    """Scores and outlier flags of every window of a series.
 
     Parameters
     ----------
     reconstruction_scores : np.ndarray
-        One score per window, in chronological order.
-    is_outlier : np.ndarray
-        Boolean array, `True` where the score is strictly above the
-        anomaly threshold.
-    window_end_indices : np.ndarray
-        Index, in the log-return series, of the last value of each
+        One-dimensional array with the reconstruction score of each
         window.
+    is_outlier : np.ndarray
+        Boolean array, `True` where the score is strictly greater than
+        the anomaly threshold.
+    window_end_indices : np.ndarray
+        Index of the last log-return of each window, in the input
+        series.
     """
 
     reconstruction_scores: np.ndarray
@@ -66,42 +67,37 @@ class AutoencoderPrediction:
 
 
 class AutoencoderPredictor:
-    """Apply a trained autoencoder to new log-returns.
+    """Score the windows of a series with a trained autoencoder.
 
-    The predictor normalizes the incoming series with the statistics
-    stored in the metadata, builds every sliding window, scores them
-    by reconstruction error and flags the windows above the anomaly
-    threshold. Unlike the training notebook, the threshold is never
-    recomputed: it comes from the training metadata, so that outliers
-    are judged against what the model learned.
-
-    This class does not know where the model came from. It receives
-    the model and its metadata already built.
+    The predictor normalizes the input with the statistics saved at
+    training time, builds every sliding window and compares each
+    reconstruction score with the saved anomaly threshold. The threshold
+    is never recomputed here.
 
     Parameters
     ----------
     model : SimpleAutoencoder
-        Trained autoencoder, already placed on `device`.
+        Trained autoencoder, already on `device`. It is put in
+        evaluation mode.
     metadata : AutoencoderModelMetadata
-        Window size, normalization statistics and anomaly threshold of
-        the trained model.
+        Training metadata of the model.
     device : str
-        Device where the windows are scored. Defaults to `"cpu"`.
+        Device where the windows are scored.
 
     Attributes
     ----------
     model : SimpleAutoencoder
-        Trained autoencoder, kept in evaluation mode.
+        Autoencoder in evaluation mode.
     metadata : AutoencoderModelMetadata
-        Metadata of the trained model.
+        Training metadata of the model.
     device : str
         Device where the windows are scored.
 
     Example
     -------
-    >>> predictor = AutoencoderPredictor(model, metadata)
-    >>> prediction = predictor.predict_from_prices(price_values)
-    >>> int(prediction.is_outlier.sum())
+    >>> predictor = AutoencoderPredictor(model=model, metadata=metadata)
+    >>> prediction = predictor.predict(log_return_values)
+    >>> prediction.is_outlier.sum()
     3
     """
 
@@ -111,64 +107,59 @@ class AutoencoderPredictor:
         metadata: AutoencoderModelMetadata,
         device: str = "cpu",
     ) -> None:
-        """Store the model in evaluation mode with its metadata."""
+        """Store the model and metadata and put the model in eval mode."""
         self.model = model
-        self.model.eval()
         self.metadata = metadata
         self.device = device
+        self.model.eval()
 
     def predict(
         self,
         log_return_values: np.ndarray | torch.Tensor,
     ) -> AutoencoderPrediction:
-        """Score every sliding window of a log-return series.
+        """Score every sliding window of a series of log-returns.
 
         Parameters
         ----------
-        log_return_values : np.ndarray or torch.Tensor
+        log_return_values : np.ndarray | torch.Tensor
             One-dimensional series of log-returns. The input is copied
-            before use, so read-only arrays and tensors that require
-            gradients are accepted and never modified.
+            and never modified.
 
         Returns
         -------
         AutoencoderPrediction
-            The reconstruction score of each window, the outlier flags
-            and the index of the last log-return of each window.
+            Scores, outlier flags and window end indices. There are
+            `n - window_size + 1` windows for `n` log-returns.
 
         Raises
         ------
         ValueError
-            If the series holds fewer values than the window size, so
-            that no window can be built.
+            If the series is not one-dimensional or has fewer values
+            than `window_size`.
 
         Example
         -------
         >>> prediction = predictor.predict(np.zeros(12))
-        >>> prediction.window_end_indices[0]
-        4
+        >>> prediction.window_end_indices
+        array([ 4,  5,  6,  7,  8,  9, 10, 11])
         """
-        series_tensor = _to_float32_tensor(log_return_values)
+        log_return_tensor = _to_float_tensor(log_return_values)
         window_size = self.metadata.window_size
-        number_of_returns = len(series_tensor)
-
-        if number_of_returns < window_size:
+        number_of_values = len(log_return_tensor)
+        if number_of_values < window_size:
             raise ValueError(
                 f"At least {window_size} log-returns are required, "
-                f"got {number_of_returns}."
+                f"got {number_of_values}."
             )
 
         normalized_tensor, _, _ = normalize_series(
-            series_tensor,
+            log_return_tensor,
             mean=self.metadata.return_train_mean,
             std=self.metadata.return_train_std,
         )
-        window_tensor = normalized_tensor.unfold(
-            dimension=0,
-            size=window_size,
-            step=1,
-        ).to(self.device)
-
+        window_tensor = normalized_tensor.unfold(0, window_size, 1).to(
+            self.device
+        )
         reconstruction_scores = compute_reconstruction_scores(
             self.model,
             window_tensor,
@@ -176,72 +167,76 @@ class AutoencoderPredictor:
 
         return AutoencoderPrediction(
             reconstruction_scores=reconstruction_scores,
-            is_outlier=(
-                reconstruction_scores > self.metadata.anomaly_threshold
-            ),
-            window_end_indices=np.arange(
-                window_size - 1,
-                number_of_returns,
-            ),
+            is_outlier=reconstruction_scores > self.metadata.anomaly_threshold,
+            window_end_indices=np.arange(window_size - 1, number_of_values),
         )
 
     def predict_from_prices(
         self,
         price_values: np.ndarray | torch.Tensor,
     ) -> AutoencoderPrediction:
-        """Score every sliding window of a price series.
+        """Score the windows of a series of closing prices.
+
+        The log-returns are computed as `log(p[t + 1]) - log(p[t])`, so
+        `m` prices give `m - 1` log-returns. The window end index `i`
+        refers to the return between the prices `i` and `i + 1`.
 
         Parameters
         ----------
-        price_values : np.ndarray or torch.Tensor
-            One-dimensional series of consecutive prices. With `m`
-            prices there are `m - 1` log-returns, so a window ending
-            at index `i` refers to the return between the prices `i`
-            and `i + 1`.
+        price_values : np.ndarray | torch.Tensor
+            One-dimensional series of positive closing prices.
 
         Returns
         -------
         AutoencoderPrediction
-            The same structure returned by `predict`, computed over the
-            log-returns of `price_values`.
+            Scores, outlier flags and window end indices, as in
+            `predict`.
 
         Raises
         ------
         ValueError
             If there are fewer than `window_size + 1` prices.
-
-        Example
-        -------
-        >>> prediction = predictor.predict_from_prices(price_values)
-        >>> prediction.reconstruction_scores.shape
-        (7,)
         """
-        price_tensor = _to_float32_tensor(price_values)
-        log_return_tensor = torch.log(price_tensor[1:]) - torch.log(
-            price_tensor[:-1]
-        )
+        price_tensor = _to_float_tensor(price_values)
+        window_size = self.metadata.window_size
+        number_of_prices = len(price_tensor)
+        if number_of_prices < window_size + 1:
+            raise ValueError(
+                f"At least {window_size + 1} prices are required, got "
+                f"{number_of_prices}. The model window size is "
+                f"{window_size}."
+            )
+        log_price_tensor = torch.log(price_tensor)
+        log_return_tensor = log_price_tensor[1:] - log_price_tensor[:-1]
 
         return self.predict(log_return_tensor)
 
 
-def _to_float32_tensor(
-    series_values: np.ndarray | torch.Tensor,
-) -> torch.Tensor:
-    """Copy a series into a detached one-dimensional float32 tensor.
+def _to_float_tensor(values: np.ndarray | torch.Tensor) -> torch.Tensor:
+    """Return a detached float32 copy of a one-dimensional series.
 
     Parameters
     ----------
-    series_values : np.ndarray or torch.Tensor
-        Series to convert. Read-only arrays and tensors that require
-        gradients are accepted, and neither is modified.
+    values : np.ndarray | torch.Tensor
+        One-dimensional series to convert. Read-only arrays and tensors
+        that require gradients are accepted.
 
     Returns
     -------
     torch.Tensor
-        One-dimensional `float32` tensor that shares no memory with
-        `series_values`.
-    """
-    if isinstance(series_values, torch.Tensor):
-        return series_values.detach().clone().to(torch.float32)
+        New float32 tensor that does not share memory with `values`.
 
-    return torch.tensor(np.asarray(series_values), dtype=torch.float32)
+    Raises
+    ------
+    ValueError
+        If `values` is not one-dimensional.
+    """
+    if isinstance(values, torch.Tensor):
+        tensor = values.detach().clone().to(torch.float32)
+    else:
+        tensor = torch.tensor(np.asarray(values), dtype=torch.float32)
+
+    if tensor.ndim != 1:
+        raise ValueError("The input series must be one-dimensional.")
+
+    return tensor

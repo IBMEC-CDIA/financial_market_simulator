@@ -1,132 +1,47 @@
 """Unit tests for AutoencoderModelService."""
 
-# pylint: disable=duplicate-code
-
 import threading
-from typing import Any, Iterator
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
 
-from generative_models.models.autoencoder.autoencoder import (
-    SimpleAutoencoder,
-)
-from generative_models.serving.autoencoder_predictor import (
-    AutoencoderModelMetadata,
-    AutoencoderPredictor,
-)
 from generative_models.serving.model_service import (
     AutoencoderModelService,
 )
 
-SERVICE_MODULE = "generative_models.serving.model_service"
+REGISTRY_PATH = (
+    "generative_models.serving.model_service.WandbAutoencoderRegistry"
+)
+LOAD_PREDICTOR_PATH = "generative_models.serving.model_service.load_predictor"
 
 
 @pytest.fixture(autouse=True)
-def reset_singleton() -> Iterator[None]:
-    """Drop the singleton instance around every test."""
+def reset_service_instance():
+    """Discard the shared service before and after every test."""
     AutoencoderModelService.reset_instance()
     yield
     AutoencoderModelService.reset_instance()
 
 
-def build_predictor(ticker: str = "PETR4.SA") -> AutoencoderPredictor:
-    """Build a predictor wrapping an untrained autoencoder.
-
-    Parameters
-    ----------
-    ticker : str
-        Ticker symbol stored in the predictor metadata.
-
-    Returns
-    -------
-    AutoencoderPredictor
-        Predictor on CPU, built from a fixed random seed.
-    """
-    torch.manual_seed(42)
-
-    return AutoencoderPredictor(
-        model=SimpleAutoencoder(input_dim=5),
-        metadata=AutoencoderModelMetadata(
-            ticker=ticker,
-            window_size=5,
-            return_train_mean=0.001,
-            return_train_std=0.02,
-            anomaly_threshold=0.5,
-            artifact_name=f"simple-autoencoder-{ticker.lower()}:v1",
-        ),
-        device="cpu",
-    )
-
-
-def build_fake_registry() -> MagicMock:
-    """Build a registry that caches predictors in a real dictionary.
-
-    Returns
-    -------
-    MagicMock
-        Stand-in registry whose `models` behaves like the real one.
-    """
+def _make_registry() -> MagicMock:
+    """Build a fake registry that keeps predictors in a models dict."""
     registry = MagicMock()
     registry.models = {}
-    registry.get_model.side_effect = (
-        lambda ticker: registry.models[ticker]
-    )
+    registry.get_model.side_effect = lambda ticker: registry.models[ticker]
 
     return registry
 
 
-def build_load_predictor(predictor: AutoencoderPredictor):
-    """Build a replacement for `load_predictor` that fills the cache.
-
-    Parameters
-    ----------
-    predictor : AutoencoderPredictor
-        Predictor returned by every call.
-
-    Returns
-    -------
-    Callable
-        Function mirroring how the real registry caches a predictor.
-    """
-
-    def load_predictor(
-        registry: MagicMock,
-        _ticker: str | None = None,
-    ) -> AutoencoderPredictor:
-        registry.models[predictor.metadata.ticker] = predictor
-        return predictor
-
-    return load_predictor
-
-
-def build_fake_artifact(
+def _make_artifact(
     collection_name: str,
     version: str,
-    created_at: str,
+    created_at: datetime,
     ticker: str,
 ) -> MagicMock:
-    """Build a stand-in for a wandb model artifact.
-
-    Parameters
-    ----------
-    collection_name : str
-        Name of the artifact collection, without the version suffix.
-    version : str
-        Version label reported by the artifact.
-    created_at : str
-        Creation timestamp of the artifact.
-    ticker : str
-        Ticker symbol stored in the artifact metadata.
-
-    Returns
-    -------
-    MagicMock
-        Object exposing the attributes the service reads.
-    """
+    """Build a fake model artifact with the given creation time."""
     artifact = MagicMock()
-    artifact.name = f"{collection_name}:latest"
+    artifact.name = f"{collection_name}:{version}"
     artifact.version = version
     artifact.created_at = created_at
     artifact.metadata = {"ticker": ticker}
@@ -134,62 +49,69 @@ def build_fake_artifact(
     return artifact
 
 
-def test_get_instance_returns_the_same_object() -> None:
-    """CA-01: the singleton builds its registry exactly once."""
-    with patch(f"{SERVICE_MODULE}.WandbAutoencoderRegistry") as registry:
+def test_get_instance_returns_the_same_object_and_builds_one_registry(
+    monkeypatch,
+) -> None:
+    """Check that repeated calls reuse the single shared service."""
+    monkeypatch.delenv("AUTOENCODER_WANDB_PROJECT", raising=False)
+    with patch(REGISTRY_PATH) as registry_class:
         first_service = AutoencoderModelService.get_instance()
         second_service = AutoencoderModelService.get_instance()
 
     assert first_service is second_service
-    registry.assert_called_once()
+    registry_class.assert_called_once()
 
 
 def test_get_instance_is_thread_safe() -> None:
-    """CA-02: concurrent callers share one instance and one registry."""
-    collected_services: list[Any] = []
-    start_barrier = threading.Barrier(10)
+    """Check that concurrent callers receive one instance and one registry."""
+    thread_count = 10
+    start_barrier = threading.Barrier(thread_count)
+    received_services = []
+    received_lock = threading.Lock()
 
-    def call_get_instance() -> None:
+    def request_service() -> None:
+        """Wait for every thread, then ask for the shared service."""
         start_barrier.wait()
-        collected_services.append(AutoencoderModelService.get_instance())
+        service = AutoencoderModelService.get_instance()
+        with received_lock:
+            received_services.append(service)
 
-    with patch(f"{SERVICE_MODULE}.WandbAutoencoderRegistry") as registry:
+    with patch(REGISTRY_PATH) as registry_class:
         threads = [
-            threading.Thread(target=call_get_instance) for _ in range(10)
+            threading.Thread(target=request_service)
+            for _ in range(thread_count)
         ]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
 
-    assert len(collected_services) == 10
+    assert len(received_services) == thread_count
     assert all(
-        service is collected_services[0] for service in collected_services
+        service is received_services[0] for service in received_services
     )
-    registry.assert_called_once()
+    registry_class.assert_called_once()
 
 
-def test_registry_is_built_from_environment_variables(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """CA-03: the three environment variables reach the registry."""
-    monkeypatch.setenv("AUTOENCODER_WANDB_PROJECT", "env-project")
-    monkeypatch.setenv("AUTOENCODER_WANDB_ENTITY", "env-entity")
+def test_get_instance_reads_settings_from_environment(monkeypatch) -> None:
+    """Check that the environment variables configure the registry."""
+    monkeypatch.setenv("AUTOENCODER_WANDB_PROJECT", "custom-project")
+    monkeypatch.setenv("AUTOENCODER_WANDB_ENTITY", "custom-entity")
     monkeypatch.setenv("AUTOENCODER_DEVICE", "cpu")
 
-    with patch(f"{SERVICE_MODULE}.WandbAutoencoderRegistry") as registry:
+    with patch(REGISTRY_PATH) as registry_class:
         AutoencoderModelService.get_instance()
 
-    keyword_arguments = registry.call_args.kwargs
+    registry_class.assert_called_once_with(
+        project_name="custom-project",
+        entity="custom-entity",
+        device="cpu",
+    )
 
-    assert keyword_arguments["project_name"] == "env-project"
-    assert keyword_arguments["entity"] == "env-entity"
-    assert keyword_arguments["device"] == "cpu"
 
-
-def test_reset_instance_forces_a_new_service() -> None:
-    """CA-04: after a reset a brand new instance is created."""
-    with patch(f"{SERVICE_MODULE}.WandbAutoencoderRegistry"):
+def test_reset_instance_makes_the_next_call_create_a_new_service() -> None:
+    """Check that reset_instance discards the shared service."""
+    with patch(REGISTRY_PATH):
         first_service = AutoencoderModelService.get_instance()
         AutoencoderModelService.reset_instance()
         second_service = AutoencoderModelService.get_instance()
@@ -197,114 +119,130 @@ def test_reset_instance_forces_a_new_service() -> None:
     assert first_service is not second_service
 
 
-def test_get_predictor_downloads_the_default_model_once() -> None:
-    """CA-05: the default model is downloaded once and then reused."""
-    predictor = build_predictor()
-    service = AutoencoderModelService(registry=build_fake_registry())
+def test_get_predictor_without_ticker_loads_the_default_once(
+    make_predictor,
+) -> None:
+    """Check that the first call loads the latest model as the default."""
+    registry = _make_registry()
+    predictor = make_predictor()
+    service = AutoencoderModelService(registry)
 
-    with patch(
-        f"{SERVICE_MODULE}.load_predictor",
-        side_effect=build_load_predictor(predictor),
-    ) as load_mock:
-        first_predictor = service.get_predictor()
-        second_predictor = service.get_predictor()
+    with patch(LOAD_PREDICTOR_PATH, return_value=predictor) as load_mock:
+        registry.models["PETR4.SA"] = predictor
+        first_result = service.get_predictor()
+        second_result = service.get_predictor()
 
-    assert first_predictor is predictor
-    assert second_predictor is predictor
-    load_mock.assert_called_once_with(service.registry, None)
+    assert first_result is predictor
+    assert second_result is predictor
+    load_mock.assert_called_once_with(registry, None)
     assert service.default_ticker == "PETR4.SA"
 
 
-def test_get_predictor_reuses_a_model_already_in_memory() -> None:
-    """CA-06: a cached ticker is served without touching wandb."""
-    predictor = build_predictor()
-    registry = build_fake_registry()
+def test_get_predictor_reuses_a_model_already_in_memory(
+    make_predictor,
+) -> None:
+    """Check that a lowercase ticker finds the model loaded in memory."""
+    registry = _make_registry()
+    predictor = make_predictor(ticker="PETR4.SA")
     registry.models["PETR4.SA"] = predictor
-    service = AutoencoderModelService(registry=registry)
+    service = AutoencoderModelService(registry)
 
-    with patch(f"{SERVICE_MODULE}.load_predictor") as load_mock:
-        served_predictor = service.get_predictor("petr4.sa")
+    with patch(LOAD_PREDICTOR_PATH) as load_mock:
+        result = service.get_predictor("petr4.sa")
 
-    assert served_predictor is predictor
+    assert result is predictor
     load_mock.assert_not_called()
 
 
-def test_get_predictor_loads_an_unknown_ticker_in_upper_case() -> None:
-    """CA-07: an unknown ticker is loaded, upper-cased."""
-    predictor = build_predictor(ticker="AAPL")
-    service = AutoencoderModelService(registry=build_fake_registry())
+def test_get_predictor_loads_an_unknown_ticker_in_uppercase(
+    make_predictor,
+) -> None:
+    """Check that a missing ticker is loaded with its uppercase name."""
+    registry = _make_registry()
+    service = AutoencoderModelService(registry)
 
     with patch(
-        f"{SERVICE_MODULE}.load_predictor",
-        side_effect=build_load_predictor(predictor),
+        LOAD_PREDICTOR_PATH,
+        return_value=make_predictor(ticker="AAPL"),
     ) as load_mock:
         service.get_predictor("aapl")
 
-    load_mock.assert_called_once_with(service.registry, "AAPL")
+    load_mock.assert_called_once_with(registry, "AAPL")
 
 
-def test_reload_without_ticker_sets_the_default() -> None:
-    """CA-08: reloading without a ticker redefines the default one."""
-    predictor = build_predictor()
-    service = AutoencoderModelService(registry=build_fake_registry())
+def test_reload_without_ticker_sets_the_default_ticker(make_predictor) -> None:
+    """Check that reloading the latest model updates the default ticker."""
+    registry = _make_registry()
+    service = AutoencoderModelService(registry)
 
     with patch(
-        f"{SERVICE_MODULE}.load_predictor",
-        side_effect=build_load_predictor(predictor),
+        LOAD_PREDICTOR_PATH,
+        return_value=make_predictor(ticker="PETR4.SA"),
     ):
         service.reload()
 
     assert service.default_ticker == "PETR4.SA"
 
 
-def test_reload_with_ticker_keeps_the_default() -> None:
-    """CA-09: reloading one ticker never changes the default model."""
-    default_predictor = build_predictor()
-    service = AutoencoderModelService(registry=build_fake_registry())
+def test_reload_with_ticker_keeps_the_default_ticker(make_predictor) -> None:
+    """Check that reloading one ticker does not change the default."""
+    registry = _make_registry()
+    service = AutoencoderModelService(registry)
+    service.default_ticker = "PETR4.SA"
 
     with patch(
-        f"{SERVICE_MODULE}.load_predictor",
-        side_effect=build_load_predictor(default_predictor),
-    ):
-        service.reload()
-
-    other_predictor = build_predictor(ticker="AAPL")
-    with patch(
-        f"{SERVICE_MODULE}.load_predictor",
-        side_effect=build_load_predictor(other_predictor),
+        LOAD_PREDICTOR_PATH,
+        return_value=make_predictor(ticker="AAPL"),
     ) as load_mock:
         service.reload("aapl")
 
-    load_mock.assert_called_once_with(service.registry, "AAPL")
+    load_mock.assert_called_once_with(registry, "AAPL")
     assert service.default_ticker == "PETR4.SA"
 
 
-def test_list_available_models_is_sorted_by_recency() -> None:
-    """CA-10: available models come newest first with versioned names."""
-    registry = build_fake_registry()
+def test_list_loaded_models_returns_metadata_in_loading_order(
+    make_predictor,
+) -> None:
+    """Check that the metadata of every loaded predictor is listed."""
+    registry = _make_registry()
+    registry.models["PETR4.SA"] = make_predictor(ticker="PETR4.SA")
+    registry.models["AAPL"] = make_predictor(ticker="AAPL")
+    service = AutoencoderModelService(registry)
+
+    loaded_metadata = service.list_loaded_models()
+
+    assert [metadata.ticker for metadata in loaded_metadata] == [
+        "PETR4.SA",
+        "AAPL",
+    ]
+
+
+def test_list_available_models_is_sorted_newest_first() -> None:
+    """Check the order and the versioned names of the available models."""
+    registry = _make_registry()
     registry.list_available_artifacts.return_value = [
-        build_fake_artifact(
+        _make_artifact(
             "simple-autoencoder-petr4.sa",
             "v1",
-            "2026-01-01T00:00:00",
+            datetime(2026, 9, 1),
             "PETR4.SA",
         ),
-        build_fake_artifact(
+        _make_artifact(
             "simple-autoencoder-aapl",
-            "v3",
-            "2026-05-01T00:00:00",
+            "v4",
+            datetime(2026, 9, 20),
             "AAPL",
         ),
     ]
-    service = AutoencoderModelService(registry=registry)
+    service = AutoencoderModelService(registry)
 
     available_models = service.list_available_models()
 
-    assert [model.ticker for model in available_models] == [
-        "AAPL",
-        "PETR4.SA",
+    assert [model.artifact_name for model in available_models] == [
+        "simple-autoencoder-aapl:v4",
+        "simple-autoencoder-petr4.sa:v1",
     ]
-    assert available_models[0].artifact_name == (
-        "simple-autoencoder-aapl:v3"
-    )
-    assert available_models[0].created_at == "2026-05-01T00:00:00"
+    assert available_models[0].ticker == "AAPL"
+    assert available_models[0].created_at == str(datetime(2026, 9, 20))
+    registry.load_model.assert_not_called()
+    registry.load_latest_model.assert_not_called()

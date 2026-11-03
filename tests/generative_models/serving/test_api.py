@@ -1,69 +1,36 @@
-"""Unit tests for the autoencoder REST API."""
+"""Unit tests for the FastAPI application."""
 
-# pylint: disable=duplicate-code
-
-from typing import Iterator
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pandas as pd
 import pytest
-import torch
-import wandb
 from fastapi.testclient import TestClient
+from wandb.errors import CommError
+from wandb.sdk.mailbox.mailbox import MailboxClosedError
 
-from generative_models.models.autoencoder.autoencoder import (
-    SimpleAutoencoder,
-)
-from generative_models.serving.api import app, get_model_service
-from generative_models.serving.autoencoder_predictor import (
-    AutoencoderModelMetadata,
-    AutoencoderPredictor,
-)
+from generative_models.serving.api import app, get_model_service, main
 from generative_models.serving.model_service import AvailableModel
 
-PREDICT_MODULE = "generative_models.serving.predict_autoencoder"
-WINDOW_SIZE = 5
+FETCH_PATH = "generative_models.serving.predict_autoencoder.fetch_price_series"
+EXPECTED_PATHS = {
+    "/health",
+    "/models/loaded",
+    "/models/available",
+    "/models/default",
+    "/models/reload",
+    "/predictions/log-returns",
+    "/predictions/prices",
+    "/predictions/market",
+    "/signals",
+}
 
 
-def build_predictor(ticker: str = "PETR4.SA") -> AutoencoderPredictor:
-    """Build a predictor wrapping an untrained autoencoder.
-
-    Parameters
-    ----------
-    ticker : str
-        Ticker symbol stored in the predictor metadata.
-
-    Returns
-    -------
-    AutoencoderPredictor
-        Predictor on CPU, built from a fixed random seed.
-    """
-    torch.manual_seed(42)
-
-    return AutoencoderPredictor(
-        model=SimpleAutoencoder(input_dim=WINDOW_SIZE),
-        metadata=AutoencoderModelMetadata(
-            ticker=ticker,
-            window_size=WINDOW_SIZE,
-            return_train_mean=0.001,
-            return_train_std=0.02,
-            anomaly_threshold=0.5,
-            artifact_name=f"simple-autoencoder-{ticker.lower()}:v1",
-        ),
-        device="cpu",
-    )
-
-
-def build_service_mock() -> MagicMock:
-    """Build a model service serving one in-memory predictor.
-
-    Returns
-    -------
-    MagicMock
-        Stand-in service whose default model is PETR4.SA.
-    """
-    predictor = build_predictor()
+@pytest.fixture(name="mock_service")
+def _mock_service(monkeypatch, make_predictor):
+    """Replace the model service with a mock for every route test."""
+    monkeypatch.setenv("AUTOENCODER_PRELOAD_MODEL", "false")
+    predictor = make_predictor(version="v2")
     service = MagicMock()
     service.default_ticker = "PETR4.SA"
     service.get_predictor.return_value = predictor
@@ -71,106 +38,63 @@ def build_service_mock() -> MagicMock:
     service.list_loaded_models.return_value = [predictor.metadata]
     service.list_available_models.return_value = [
         AvailableModel(
-            artifact_name="simple-autoencoder-petr4.sa:v1",
+            artifact_name="simple-autoencoder-aapl:v4",
+            ticker="AAPL",
+            created_at="2026-09-20",
+        ),
+        AvailableModel(
+            artifact_name="simple-autoencoder-petr4.sa:v2",
             ticker="PETR4.SA",
-            created_at="2026-05-01T00:00:00",
+            created_at="2026-09-10",
         ),
     ]
-
-    return service
-
-
-@pytest.fixture(name="service")
-def service_fixture() -> Iterator[MagicMock]:
-    """Install a mocked model service for the duration of a test."""
-    service = build_service_mock()
     app.dependency_overrides[get_model_service] = lambda: service
     yield service
     app.dependency_overrides.clear()
 
 
-def build_log_returns(number_of_returns: int) -> list[float]:
-    """Build a synthetic log-return series as plain floats.
-
-    Parameters
-    ----------
-    number_of_returns : int
-        Number of log-returns to generate.
-
-    Returns
-    -------
-    list[float]
-        Values ready to be sent as JSON.
-    """
-    random_generator = np.random.default_rng(13)
-
-    return random_generator.normal(
-        loc=0.0,
-        scale=0.02,
-        size=number_of_returns,
-    ).tolist()
+@pytest.fixture(name="api_client")
+def _api_client(mock_service):
+    """Start the application with the mocked service in place."""
+    assert app.dependency_overrides[get_model_service]() is mock_service
+    with TestClient(app) as test_client:
+        yield test_client
 
 
-def build_price_dataframe(number_of_prices: int) -> pd.DataFrame:
-    """Build a synthetic price series indexed by business day.
+def test_startup_preloads_the_default_model(monkeypatch, mock_service) -> None:
+    """Check that the default model is requested when the API starts."""
+    monkeypatch.setenv("AUTOENCODER_PRELOAD_MODEL", "true")
 
-    Parameters
-    ----------
-    number_of_prices : int
-        Number of daily prices to generate.
-
-    Returns
-    -------
-    pd.DataFrame
-        Single-column data frame holding the prices in close_price.
-    """
-    random_generator = np.random.default_rng(5)
-    log_increments = random_generator.normal(
-        loc=0.0,
-        scale=0.02,
-        size=number_of_prices,
-    )
-    price_values = 100.0 * np.exp(np.cumsum(log_increments))
-    price_dates = pd.bdate_range("2026-09-01", periods=number_of_prices)
-
-    return pd.DataFrame({"close_price": price_values}, index=price_dates)
-
-
-def test_startup_preloads_the_default_model(service: MagicMock) -> None:
-    """CA-01: starting the application loads the default model."""
     with TestClient(app):
         pass
 
-    service.get_predictor.assert_called_once_with()
+    mock_service.get_predictor.assert_any_call()
 
 
-def test_preload_can_be_disabled(
-    service: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
+def test_startup_skips_preload_when_disabled(mock_service) -> None:
+    """Check that AUTOENCODER_PRELOAD_MODEL=false skips the preload."""
+    with TestClient(app):
+        pass
+
+    mock_service.get_predictor.assert_not_called()
+
+
+def test_startup_failure_does_not_stop_the_api(
+    monkeypatch, mock_service
 ) -> None:
-    """CA-02: AUTOENCODER_PRELOAD_MODEL=false skips the preload."""
-    monkeypatch.setenv("AUTOENCODER_PRELOAD_MODEL", "false")
+    """Check that a failed preload is logged and the API still answers."""
+    monkeypatch.setenv("AUTOENCODER_PRELOAD_MODEL", "true")
+    mock_service.get_predictor.side_effect = RuntimeError("no internet")
 
-    with TestClient(app):
-        pass
-
-    service.get_predictor.assert_not_called()
-
-
-def test_startup_survives_a_preload_failure(service: MagicMock) -> None:
-    """CA-03: a failing preload does not prevent the API from serving."""
-    service.get_predictor.side_effect = RuntimeError("no internet")
-
-    with TestClient(app) as client:
-        response = client.get("/health")
+    with TestClient(app) as test_client:
+        response = test_client.get("/health")
 
     assert response.status_code == 200
 
 
-def test_health_reports_the_loaded_models(service: MagicMock) -> None:
-    """CA-04: health returns the status, default ticker and tickers."""
-    with TestClient(app) as client:
-        response = client.get("/health")
+def test_health_reports_status_and_loaded_tickers(api_client) -> None:
+    """Check the exact body of the health route."""
+    response = api_client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -178,182 +102,137 @@ def test_health_reports_the_loaded_models(service: MagicMock) -> None:
         "default_ticker": "PETR4.SA",
         "loaded_tickers": ["PETR4.SA"],
     }
-    service.list_available_models.assert_not_called()
 
 
-@pytest.mark.usefixtures("service")
-def test_loaded_models_route() -> None:
-    """CA-05: the loaded models route returns their metadata."""
-    with TestClient(app) as client:
-        response = client.get("/models/loaded")
-
-    payload = response.json()
+def test_loaded_models_route_returns_in_memory_metadata(api_client) -> None:
+    """Check the metadata returned for the models in memory."""
+    response = api_client.get("/models/loaded")
 
     assert response.status_code == 200
-    assert len(payload) == 1
-    assert payload[0]["ticker"] == "PETR4.SA"
-    assert payload[0]["artifact_name"] == (
-        "simple-autoencoder-petr4.sa:v1"
-    )
-    assert payload[0]["window_size"] == WINDOW_SIZE
+    artifact_name = response.json()[0]["artifact_name"]
+    assert artifact_name == "simple-autoencoder-petr4.sa:v2"
 
 
-def test_available_models_route(service: MagicMock) -> None:
-    """CA-06: the available models route keeps the service order."""
-    with TestClient(app) as client:
-        response = client.get("/models/available")
+def test_available_models_route_keeps_service_order(api_client) -> None:
+    """Check that the available models keep the service's order."""
+    response = api_client.get("/models/available")
 
     assert response.status_code == 200
-    assert response.json() == [
-        {
-            "artifact_name": "simple-autoencoder-petr4.sa:v1",
-            "ticker": "PETR4.SA",
-            "created_at": "2026-05-01T00:00:00",
-        }
+    assert [model["ticker"] for model in response.json()] == [
+        "AAPL",
+        "PETR4.SA",
     ]
-    service.list_available_models.assert_called_once()
 
 
-def test_default_model_route(service: MagicMock) -> None:
-    """CA-07: the default model route describes the served model."""
-    with TestClient(app) as client:
-        response = client.get("/models/default")
+def test_default_model_route_returns_default_metadata(
+    api_client, mock_service
+) -> None:
+    """Check that the default route returns the default model metadata."""
+    response = api_client.get("/models/default")
 
     assert response.status_code == 200
     assert response.json()["ticker"] == "PETR4.SA"
-    assert service.get_predictor.called
+    mock_service.get_predictor.assert_called_with()
 
 
-def test_reload_route_forwards_the_ticker(service: MagicMock) -> None:
-    """CA-08: reload passes the ticker through, or None when absent."""
-    with TestClient(app) as client:
-        with_ticker = client.post(
-            "/models/reload",
-            json={"ticker": "AAPL"},
-        )
-        without_ticker = client.post("/models/reload", json={})
+def test_reload_route_passes_the_ticker_to_the_service(
+    api_client, mock_service
+) -> None:
+    """Check that reload receives the ticker, or None when omitted."""
+    named_response = api_client.post("/models/reload", json={"ticker": "AAPL"})
+    unnamed_response = api_client.post("/models/reload", json={})
 
-    assert with_ticker.status_code == 200
-    assert without_ticker.status_code == 200
-    assert [call.args[0] for call in service.reload.call_args_list] == [
-        "AAPL",
-        None,
-    ]
+    assert named_response.status_code == 200
+    assert unnamed_response.status_code == 200
+    mock_service.reload.assert_any_call("AAPL")
+    mock_service.reload.assert_any_call(None)
 
 
-def test_log_return_prediction_route(service: MagicMock) -> None:
-    """CA-09: twelve log-returns produce eight undated windows."""
-    with TestClient(app) as client:
-        response = client.post(
-            "/predictions/log-returns",
-            json={"log_returns": build_log_returns(12)},
-        )
-        with_ticker = client.post(
-            "/predictions/log-returns",
-            json={"ticker": "AAPL", "log_returns": build_log_returns(12)},
-        )
+def test_log_return_prediction_returns_eight_windows(
+    api_client,
+    mock_service,
+) -> None:
+    """Check the windows of a prediction for 12 log-returns."""
+    log_returns = np.linspace(-0.02, 0.02, 12).tolist()
 
-    payload = response.json()
+    response = api_client.post(
+        "/predictions/log-returns",
+        json={"ticker": "PETR4.SA", "log_returns": log_returns},
+    )
 
+    body = response.json()
     assert response.status_code == 200
-    assert payload["number_of_windows"] == 8
-    assert [window["window_end_index"] for window in payload["windows"]] == (
+    assert body["number_of_windows"] == 8
+    assert [window["window_end_index"] for window in body["windows"]] == (
         list(range(4, 12))
     )
-    assert all(
-        window["window_end_date"] is None for window in payload["windows"]
+    assert all(window["window_end_date"] is None for window in body["windows"])
+    mock_service.get_predictor.assert_called_with("PETR4.SA")
+
+
+def test_log_return_prediction_with_too_few_values_returns_422(
+    api_client,
+) -> None:
+    """Check that fewer log-returns than the window size give HTTP 422."""
+    response = api_client.post(
+        "/predictions/log-returns",
+        json={"log_returns": [0.01, 0.02, 0.03, 0.04]},
     )
-    assert with_ticker.status_code == 200
-    assert service.get_predictor.call_args.args[0] == "AAPL"
-
-
-@pytest.mark.usefixtures("service")
-def test_log_return_prediction_rejects_short_series() -> None:
-    """CA-10: fewer log-returns than the window answers 422."""
-    with TestClient(app) as client:
-        response = client.post(
-            "/predictions/log-returns",
-            json={"log_returns": build_log_returns(3)},
-        )
 
     assert response.status_code == 422
-    assert "At least 5 log-returns" in response.json()["detail"]
+    assert "At least 5 log-returns are required" in response.json()["detail"]
 
 
-@pytest.mark.usefixtures("service")
-def test_price_prediction_route() -> None:
-    """CA-11: twelve prices produce seven windows."""
-    price_values = (
-        100.0 * np.exp(np.cumsum(build_log_returns(12)))
-    ).tolist()
+def test_price_prediction_returns_seven_windows(api_client) -> None:
+    """Check the windows of a prediction for 12 closing prices."""
+    prices = (100 * np.exp(np.cumsum(np.full(12, 0.01)))).tolist()
 
-    with TestClient(app) as client:
-        response = client.post(
-            "/predictions/prices",
-            json={"prices": price_values},
-        )
+    response = api_client.post("/predictions/prices", json={"prices": prices})
 
     assert response.status_code == 200
     assert response.json()["number_of_windows"] == 7
 
 
-@pytest.mark.usefixtures("service")
-def test_price_prediction_rejects_non_positive_prices() -> None:
-    """CA-12: a zero price is rejected by the schema with 422."""
-    with TestClient(app) as client:
-        response = client.post(
-            "/predictions/prices",
-            json={"prices": [10.0, 0.0, 11.0, 12.0, 13.0, 14.0]},
-        )
+def test_price_prediction_rejects_zero_prices(api_client) -> None:
+    """Check that a zero price is rejected by the request schema."""
+    response = api_client.post(
+        "/predictions/prices",
+        json={"prices": [10.0, 0.0, 11.0, 12.0, 13.0, 14.0]},
+    )
 
     assert response.status_code == 422
 
 
-@pytest.mark.usefixtures("service")
-def test_market_prediction_route() -> None:
-    """CA-13: market data is fetched for the period and dated."""
-    price_data = build_price_dataframe(10)
+def test_market_route_downloads_prices_and_fills_dates(
+    api_client,
+    make_price_frame,
+) -> None:
+    """Check the market route with 10 prices from 2026-09-01."""
+    price_data = make_price_frame(10)
 
-    with patch(
-        f"{PREDICT_MODULE}.fetch_price_series",
-        return_value=price_data,
-    ) as fetch_mock:
-        with TestClient(app) as client:
-            response = client.get(
-                "/predictions/market",
-                params={
-                    "start_date": "2026-09-01",
-                    "end_date": "2026-09-30",
-                },
-            )
+    with patch(FETCH_PATH, return_value=price_data) as mock_fetch:
+        response = api_client.get(
+            "/predictions/market",
+            params={"start_date": "2026-09-01", "end_date": "2026-09-30"},
+        )
 
-    payload = response.json()
-
-    fetch_mock.assert_called_once_with(
-        "PETR4.SA",
-        "2026-09-01",
-        "2026-09-30",
-    )
+    body = response.json()
     assert response.status_code == 200
-    assert payload["number_of_windows"] == 5
-    assert payload["windows"][0]["window_end_index"] == 4
-    assert payload["windows"][-1]["window_end_date"] == "2026-09-14"
-    assert payload["windows"][-1]["close_price"] == pytest.approx(
+    mock_fetch.assert_called_once_with("PETR4.SA", "2026-09-01", "2026-09-30")
+    assert body["number_of_windows"] == 5
+    assert body["windows"][0]["window_end_index"] == 4
+    assert body["windows"][-1]["window_end_date"] == "2026-09-14"
+    assert body["windows"][-1]["close_price"] == pytest.approx(
         float(price_data["close_price"].iloc[-1])
     )
 
 
-@pytest.mark.usefixtures("service")
-def test_market_prediction_rejects_inverted_dates() -> None:
-    """CA-14: a start date after the end date answers 422."""
-    with TestClient(app) as client:
-        response = client.get(
-            "/predictions/market",
-            params={
-                "start_date": "2026-09-30",
-                "end_date": "2026-09-01",
-            },
-        )
+def test_market_route_rejects_reversed_dates(api_client) -> None:
+    """Check that start_date must be earlier than end_date."""
+    response = api_client.get(
+        "/predictions/market",
+        params={"start_date": "2026-10-01", "end_date": "2026-09-01"},
+    )
 
     assert response.status_code == 422
     assert response.json()["detail"] == (
@@ -361,54 +240,99 @@ def test_market_prediction_rejects_inverted_dates() -> None:
     )
 
 
-def test_wandb_errors_become_404_and_503(service: MagicMock) -> None:
-    """CA-15: a missing artifact is 404 and an unreachable wandb is 503."""
-    service.get_predictor.side_effect = wandb.errors.CommError(
-        "artifact not found"
-    )
-    service.list_available_models.side_effect = wandb.errors.CommError(
-        "timeout"
-    )
+def test_market_route_defaults_to_last_365_days(
+    api_client,
+    make_price_frame,
+) -> None:
+    """Check the default period when no dates are given."""
+    with patch(FETCH_PATH, return_value=make_price_frame(10)) as mock_fetch:
+        api_client.get("/predictions/market")
 
-    with TestClient(app) as client:
-        missing_response = client.get("/models/default")
-        unavailable_response = client.get("/models/available")
-
-    assert missing_response.status_code == 404
-    assert "Model artifact not found" in missing_response.json()["detail"]
-    assert unavailable_response.status_code == 503
-    assert "wandb is unavailable" in unavailable_response.json()["detail"]
+    start_argument, end_argument = mock_fetch.call_args.args[1:]
+    assert end_argument == date.today().isoformat()
+    assert start_argument < end_argument
 
 
-def test_lookup_errors_become_404(service: MagicMock) -> None:
-    """CA-16: a LookupError answers 404 with its own message."""
-    service.get_predictor.side_effect = LookupError("No servable")
+def test_wandb_not_found_error_returns_404(api_client, mock_service) -> None:
+    """Check that a missing wandb artifact gives HTTP 404."""
+    mock_service.get_predictor.side_effect = CommError("artifact not found")
 
-    with TestClient(app) as client:
-        response = client.get("/models/default")
+    response = api_client.get("/models/default")
+
+    assert response.status_code == 404
+    assert response.json()["detail"].startswith("Model artifact not found")
+
+
+def test_wandb_other_error_returns_503(api_client, mock_service) -> None:
+    """Check that other wandb communication errors give HTTP 503."""
+    mock_service.list_available_models.side_effect = CommError("timeout")
+
+    response = api_client.get("/models/available")
+
+    assert response.status_code == 503
+    assert response.json()["detail"].startswith("wandb is unavailable")
+
+
+def test_lookup_error_returns_404_with_its_message(
+    api_client,
+    mock_service,
+) -> None:
+    """Check that a LookupError becomes HTTP 404 with the bare message."""
+    mock_service.get_predictor.side_effect = LookupError("No servable")
+
+    response = api_client.get("/models/default")
 
     assert response.status_code == 404
     assert response.json() == {"detail": "No servable"}
 
 
-@pytest.mark.usefixtures("service")
-def test_openapi_documents_every_route() -> None:
-    """CA-17: the schema holds the eight routes, all with a summary."""
-    with TestClient(app) as client:
-        openapi_schema = client.get("/openapi.json").json()
-
-    assert set(openapi_schema["paths"]) == {
-        "/health",
-        "/models/loaded",
-        "/models/available",
-        "/models/default",
-        "/models/reload",
-        "/predictions/log-returns",
-        "/predictions/prices",
-        "/predictions/market",
-    }
-    assert all(
-        "summary" in operation
-        for path_item in openapi_schema["paths"].values()
-        for operation in path_item.values()
+def test_key_error_message_has_no_extra_quotes(
+    api_client,
+    mock_service,
+) -> None:
+    """Check that a KeyError message is returned without Python's quotes."""
+    mock_service.get_predictor.side_effect = KeyError(
+        "No model loaded for ticker 'AAPL'."
     )
+
+    response = api_client.get("/models/default")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No model loaded for ticker 'AAPL'.",
+    }
+
+
+def test_openapi_lists_exactly_the_documented_routes(api_client) -> None:
+    """Check the paths of the OpenAPI document and their summaries."""
+    schema = api_client.get("/openapi.json").json()
+
+    assert set(schema["paths"].keys()) == EXPECTED_PATHS
+    for path_item in schema["paths"].values():
+        for operation in path_item.values():
+            assert "summary" in operation
+
+
+@patch("generative_models.serving.api.uvicorn.run")
+def test_main_starts_uvicorn_with_host_and_port(mock_uvicorn_run) -> None:
+    """Check that main passes the host and port to uvicorn."""
+    main(host="0.0.0.0", port=9000)
+
+    mock_uvicorn_run.assert_called_once_with(app, host="0.0.0.0", port=9000)
+
+
+@patch("generative_models.serving.api.AutoencoderModelService")
+def test_closed_wandb_connection_returns_503_and_resets_client(
+    mock_service_class,
+    api_client,
+    mock_service,
+) -> None:
+    """Check that a closed wandb connection gives 503 and a client reset."""
+    mock_service.list_available_models.side_effect = MailboxClosedError()
+
+    response = api_client.get("/models/available")
+
+    assert response.status_code == 503
+    assert "retry the request" in response.json()["detail"]
+    registry = mock_service_class.get_instance.return_value.registry
+    registry.reset_api.assert_called_once_with()

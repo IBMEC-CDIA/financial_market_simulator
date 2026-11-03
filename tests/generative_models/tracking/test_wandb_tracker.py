@@ -52,6 +52,24 @@ def test_start_run_uses_anonymous_login_without_api_key(
 
 
 @patch("generative_models.tracking.wandb_tracker.wandb")
+def test_start_run_skips_login_when_wandb_mode_is_disabled(
+    mock_wandb, monkeypatch, tmp_path
+) -> None:
+    """Check that WANDB_MODE=disabled prevents any login attempt."""
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+    tracker = _make_tracker(monkeypatch, tmp_path)
+
+    tracker.start_run()
+
+    mock_wandb.login.assert_not_called()
+    mock_wandb.init.assert_called_once_with(
+        project="test-project",
+        mode="disabled",
+        config={"learning_rate": 0.001},
+    )
+
+
+@patch("generative_models.tracking.wandb_tracker.wandb")
 def test_start_run_falls_back_to_disabled_on_login_error(
     mock_wandb, monkeypatch, tmp_path
 ) -> None:

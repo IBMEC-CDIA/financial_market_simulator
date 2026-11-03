@@ -1,0 +1,310 @@
+name: Train
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model package in generative_models.models, for example base_autoencoder"
+        required: true
+        default: "base_autoencoder"
+        type: string
+      tickers:
+        description: "Comma-separated ticker symbols, for example AAPL,MSFT,PETR4.SA"
+        required: true
+        default: "AAPL"
+        type: string
+      wandb_api_key:
+        description: "W&B API key. Leave empty to use the WANDB_API_KEY secret. Typed values are not masked by GitHub in the form"
+        required: false
+        default: ""
+        type: string
+      epochs:
+        description: "Number of training epochs"
+        default: 300
+        type: number
+      learning_rate:
+        description: "Learning rate of the Adam optimizer"
+        default: 0.001
+        type: number
+      window_size:
+        description: "Number of log-returns in each window"
+        default: 10
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: train-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci-check:
+    name: Check that CI passed for this commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Wait for the CI run of this commit
+        run: |
+          for attempt in $(seq 1 60); do
+            successful_runs=$(gh run list               --repo "$GITHUB_REPOSITORY"               --workflow ci.yml               --commit "$GITHUB_SHA"               --status success               --limit 1               --json databaseId               --jq 'length')
+            if [ "$successful_runs" -ge 1 ]; then
+              echo "CI passed for commit $GITHUB_SHA."
+              exit 0
+            fi
+            total_runs=$(gh run list               --repo "$GITHUB_REPOSITORY"               --workflow ci.yml               --commit "$GITHUB_SHA"               --json databaseId               --jq 'length')
+            pending_runs=$(gh run list               --repo "$GITHUB_REPOSITORY"               --workflow ci.yml               --commit "$GITHUB_SHA"               --json status               --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$pending_runs" -eq 0 ] && [ "$total_runs" -gt 0 ]; then
+              echo "The CI runs of commit $GITHUB_SHA finished without success."
+              exit 1
+            fi
+            if [ "$pending_runs" -eq 0 ] && [ "$attempt" -ge 6 ]; then
+              echo "No CI run was found for commit $GITHUB_SHA after 3 minutes."
+              exit 1
+            fi
+            echo "Waiting for the CI of commit $GITHUB_SHA (attempt $attempt of 60)."
+            sleep 30
+          done
+          echo "Timed out waiting for the CI of commit $GITHUB_SHA."
+          exit 1
+
+  plan:
+    name: Check tickers and W&B key
+    needs: ci-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      model: ${{ steps.model.outputs.model }}
+      tickers: ${{ steps.parse.outputs.tickers }}
+      tickers_csv: ${{ steps.parse.outputs.tickers_csv }}
+
+    env:
+      MODEL_INPUT: ${{ inputs.model }}
+      TICKERS_INPUT: ${{ inputs.tickers }}
+      WANDB_KEY_INPUT: ${{ inputs.wandb_api_key }}
+      WANDB_KEY_SECRET: ${{ secrets.WANDB_API_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check the model package
+        id: model
+        run: |
+          if ! printf '%s' "$MODEL_INPUT" | grep -Eq '^[a-z][a-z0-9_]*$'; then
+            echo "Invalid model name: $MODEL_INPUT"
+            exit 1
+          fi
+          model_directory="src/generative_models/models/$MODEL_INPUT"
+          for module_file in __init__.py trainer_factory.py overfitting.py; do
+            if [ ! -f "$model_directory/$module_file" ]; then
+              echo "The model $MODEL_INPUT has no $module_file in $model_directory."
+              exit 1
+            fi
+          done
+          echo "model=$MODEL_INPUT" >> "$GITHUB_OUTPUT"
+          echo "Model to train: $MODEL_INPUT"
+
+      - name: Parse the ticker list
+        id: parse
+        run: |
+          invalid=$(printf '%s' "$TICKERS_INPUT" | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+            | grep -v '^$' \
+            | grep -E -v '^[A-Za-z0-9._^=-]+$' || true)
+          if [ -n "$invalid" ]; then
+            echo "Invalid ticker symbols:"
+            echo "$invalid"
+            exit 1
+          fi
+
+          tickers_json=$(printf '%s' "$TICKERS_INPUT" | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+            | grep -v '^$' \
+            | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          if [ "$(printf '%s' "$tickers_json" | jq 'length')" -lt 1 ]; then
+            echo "No ticker symbol was given."
+            exit 1
+          fi
+
+          tickers_csv=$(printf '%s' "$tickers_json" | jq -r 'join(",")')
+          echo "tickers=$tickers_json" >> "$GITHUB_OUTPUT"
+          echo "tickers_csv=$tickers_csv" >> "$GITHUB_OUTPUT"
+          echo "Tickers to train: $tickers_csv"
+
+      - name: Require a W&B API key
+        run: |
+          if [ -z "$WANDB_KEY_INPUT" ] && [ -z "$WANDB_KEY_SECRET" ]; then
+            echo "A W&B API key is required: fill in wandb_api_key or set the WANDB_API_KEY secret."
+            exit 1
+          fi
+          echo "A W&B API key was found."
+
+  test-end-to-end:
+    name: End-to-end tests
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Run end-to-end tests
+        run: uv run pytest tests/end_to_end
+
+  collect-data:
+    name: Collect market data
+    needs:
+      - plan
+      - test-end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        ticker: ${{ fromJSON(needs.plan.outputs.tickers) }}
+
+    env:
+      TICKER: ${{ matrix.ticker }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Collect the market prices
+        run: >
+          uv run python -m generative_models.data.collect_market_data
+          --ticker "$TICKER"
+          --output-path "market-data/$TICKER.csv"
+
+      - name: Upload market prices
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-data-${{ matrix.ticker }}
+          path: market-data/*.csv
+          if-no-files-found: error
+
+  train-autoencoder:
+    name: Train autoencoder
+    needs:
+      - plan
+      - collect-data
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    env:
+      WANDB_API_KEY: ${{ inputs.wandb_api_key || secrets.WANDB_API_KEY }}
+      MODEL: ${{ needs.plan.outputs.model }}
+      TICKERS: ${{ needs.plan.outputs.tickers_csv }}
+      EPOCHS: ${{ inputs.epochs }}
+      LEARNING_RATE: ${{ inputs.learning_rate }}
+      WINDOW_SIZE: ${{ inputs.window_size }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Hide the W&B API key from the logs
+        run: |
+          if [ -n "$WANDB_API_KEY" ]; then
+            echo "::add-mask::$WANDB_API_KEY"
+          fi
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Train the selected model for every ticker
+        run: >
+          uv run python -m generative_models.models.run_model_training
+          --model "$MODEL"
+          --tickers "$TICKERS"
+          --epochs "$EPOCHS"
+          --learning-rate "$LEARNING_RATE"
+          --window-size "$WINDOW_SIZE"
+          --device cpu
+          --output-directory artifacts
+
+      - name: Upload model weights and reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-models
+          path: |
+            artifacts/*.pt
+            artifacts/*-overfitting.json
+          if-no-files-found: error
+
+  evaluate:
+    name: Evaluate overfitting
+    needs:
+      - plan
+      - train-autoencoder
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      MODEL: ${{ needs.plan.outputs.model }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Download model weights and reports
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-models
+          path: artifacts
+
+      - name: Check overfitting and baseline of every ticker
+        run: |
+          for report in artifacts/*-overfitting.json; do
+            uv run python -m generative_models.models."$MODEL".overfitting \
+              --report-path "$report"
+          done
+
+  pipeline-success:
+    name: Train Run Successfully
+    if: always()
+    needs:
+      - ci-check
+      - plan
+      - test-end-to-end
+      - collect-data
+      - train-autoencoder
+      - evaluate
+    runs-on: ubuntu-latest
+
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
+
+    steps:
+      - name: Check that every job succeeded
+        run: |
+          FAILED_JOBS=$(printf '%s' "$NEEDS_JSON" | jq -r '
+            to_entries[]
+            | select(.value.result != "success")
+            | "\(.key): \(.value.result)"')
+          if [ -n "$FAILED_JOBS" ]; then
+            echo "Jobs that did not succeed:"
+            echo "$FAILED_JOBS"
+            exit 1
+          fi
+          echo "All jobs succeeded."

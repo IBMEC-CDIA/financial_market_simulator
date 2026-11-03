@@ -1,38 +1,37 @@
-"""Process-wide service that keeps the served models in memory."""
+"""Process-wide service that keeps autoencoder predictors in memory."""
 
 import os
 import threading
 from dataclasses import dataclass
-from typing import Optional
 
-from generative_models.models.autoencoder.config import TrackingConfig
+from generative_models.models.base_autoencoder.config import TrackingConfig
 from generative_models.serving.autoencoder_predictor import (
     AutoencoderModelMetadata,
     AutoencoderPredictor,
 )
+from generative_models.serving.local_autoencoder_registry import (
+    LocalAutoencoderRegistry,
+)
 from generative_models.serving.predict_autoencoder import load_predictor
 from generative_models.serving.wandb_autoencoder_registry import (
     WandbAutoencoderRegistry,
+    build_versioned_artifact_name,
 )
-
-PROJECT_ENVIRONMENT_VARIABLE = "AUTOENCODER_WANDB_PROJECT"
-ENTITY_ENVIRONMENT_VARIABLE = "AUTOENCODER_WANDB_ENTITY"
-DEVICE_ENVIRONMENT_VARIABLE = "AUTOENCODER_DEVICE"
 
 
 @dataclass
 class AvailableModel:
-    """Summary of a model artifact that could be served.
+    """A model artifact that can be loaded from wandb.
 
     Parameters
     ----------
     artifact_name : str
-        Versioned name of the artifact, such as
+        Versioned name of the artifact, for example
         `"simple-autoencoder-aapl:v3"`.
     ticker : str
-        Ticker symbol stored in the artifact metadata.
+        Ticker symbol the model was trained on.
     created_at : str
-        Creation timestamp of the artifact.
+        Creation time of the artifact, as reported by wandb.
     """
 
     artifact_name: str
@@ -41,193 +40,211 @@ class AvailableModel:
 
 
 class AutoencoderModelService:
-    """Single source of served models inside one process.
+    """Share one model registry and its predictors across requests.
 
-    The service exists so that each model is downloaded from wandb
-    only once, no matter how many requests ask for it. It also holds
-    the notion of a default model, served whenever a request does not
-    name a ticker.
-
-    Every method that reads or fills the cache takes the same
-    reentrant lock, so two simultaneous requests never download the
-    same model twice.
+    Within a process, each model is downloaded from wandb only once and
+    reused by every call. The service also keeps a default ticker,
+    used when a request does not name one. The first instance is
+    created by `get_instance`, and the settings come from the
+    `AUTOENCODER_WANDB_PROJECT`, `AUTOENCODER_WANDB_ENTITY` and
+    `AUTOENCODER_DEVICE` environment variables.
 
     Parameters
     ----------
     registry : WandbAutoencoderRegistry
-        Registry used to read the models and to cache them in memory.
+        Registry that loads and keeps the models in memory.
 
     Attributes
     ----------
     registry : WandbAutoencoderRegistry
-        Registry used to read the models.
+        Registry that keeps the loaded models.
     default_ticker : str | None
-        Ticker of the default model, `None` until one is loaded.
+        Ticker of the default model, or `None` until it is loaded.
 
     Example
     -------
     >>> service = AutoencoderModelService.get_instance()
-    >>> predictor = service.get_predictor()
-    >>> service.default_ticker
-    'PETR4.SA'
+    >>> predictor = service.get_predictor("PETR4.SA")
     """
 
-    _instance: Optional["AutoencoderModelService"] = None
+    _instance: "AutoencoderModelService | None" = None
     _instance_lock = threading.Lock()
 
-    def __init__(self, registry: WandbAutoencoderRegistry) -> None:
-        """Store the registry and start without a default model."""
+    def __init__(
+        self,
+        registry: WandbAutoencoderRegistry | LocalAutoencoderRegistry,
+    ) -> None:
+        """Store the registry and create the lock of the service."""
         self.registry = registry
         self.default_ticker: str | None = None
-        self._access_lock = threading.RLock()
+        self._lock = threading.RLock()
 
     @classmethod
     def get_instance(cls) -> "AutoencoderModelService":
-        """Return the service of this process, building it once.
+        """Return the shared service, creating it on first use.
+
+        Creation is thread-safe: concurrent callers receive the same
+        instance.
 
         Returns
         -------
         AutoencoderModelService
-            The single instance of the service. The first caller
-            builds it, under a lock with double checking, so that
-            concurrent callers share one registry.
+            The process-wide service.
         """
         if cls._instance is None:
             with cls._instance_lock:
                 if cls._instance is None:
-                    cls._instance = cls(registry=cls._build_registry())
+                    cls._instance = cls(_build_registry_from_environment())
 
         return cls._instance
 
     @classmethod
     def reset_instance(cls) -> None:
-        """Discard the current instance, so the next call rebuilds it."""
+        """Discard the shared service so the next call creates a new one.
+
+        This is mainly used by the tests.
+        """
         with cls._instance_lock:
             cls._instance = None
 
-    @classmethod
-    def _build_registry(cls) -> WandbAutoencoderRegistry:
-        """Build the registry described by the environment variables.
+    def preload_all(self) -> list[str]:
+        """Load every servable model into memory, once at startup.
 
         Returns
         -------
-        WandbAutoencoderRegistry
-            Registry whose project, entity and device come from
-            `AUTOENCODER_WANDB_PROJECT`, `AUTOENCODER_WANDB_ENTITY`
-            and `AUTOENCODER_DEVICE`, falling back to the defaults of
-            the training configuration.
+        list[str]
+            Tickers of the loaded models.
         """
-        return WandbAutoencoderRegistry(
-            project_name=os.getenv(
-                PROJECT_ENVIRONMENT_VARIABLE,
-                TrackingConfig.project_name,
-            ),
-            entity=os.getenv(ENTITY_ENVIRONMENT_VARIABLE),
-            device=os.getenv(DEVICE_ENVIRONMENT_VARIABLE),
-        )
+        with self._lock:
+            return self.registry.load_all_models()
 
     def get_predictor(
         self,
         ticker: str | None = None,
     ) -> AutoencoderPredictor:
-        """Return a predictor, downloading it only when needed.
+        """Return the predictor of a ticker, loading it only if needed.
+
+        Without a ticker, the default model is returned. It is loaded
+        as the latest model when no default exists yet. With a ticker,
+        the name is converted to upper case, and a model already in
+        memory is reused.
 
         Parameters
         ----------
         ticker : str | None
-            Ticker symbol to serve, in any case. When `None`, the
-            default model is served, and loaded first if no default
-            has been chosen yet.
+            Ticker symbol. When empty or `None`, the default model is
+            used.
 
         Returns
         -------
         AutoencoderPredictor
-            Predictor held in memory for the requested ticker.
-
-        Example
-        -------
-        >>> predictor = service.get_predictor("petr4.sa")
-        >>> predictor.metadata.ticker
-        'PETR4.SA'
+            Predictor ready for inference.
         """
-        with self._access_lock:
+        with self._lock:
             if not ticker:
                 if self.default_ticker is None:
                     return self.reload()
-
                 return self.registry.get_model(self.default_ticker)
 
-            upper_case_ticker = ticker.upper()
-            if upper_case_ticker in self.registry.models:
-                return self.registry.models[upper_case_ticker]
+            normalized_ticker = ticker.upper()
+            if normalized_ticker in self.registry.models:
+                return self.registry.get_model(normalized_ticker)
 
-            return load_predictor(self.registry, upper_case_ticker)
+            return load_predictor(self.registry, normalized_ticker)
 
     def reload(
         self,
         ticker: str | None = None,
     ) -> AutoencoderPredictor:
-        """Download a model again, replacing the one in memory.
+        """Download a model again and replace the one in memory.
+
+        Without a ticker, the latest model of any ticker is loaded and
+        becomes the new default. With a ticker, only that model is
+        replaced, and the default ticker does not change.
 
         Parameters
         ----------
         ticker : str | None
-            Ticker symbol to reload, in any case. When `None`, the
-            most recent model of the project is loaded and becomes the
-            new default; when given, the default model is left
-            untouched.
+            Ticker symbol to reload. When empty or `None`, the latest
+            model of any ticker is loaded.
 
         Returns
         -------
         AutoencoderPredictor
-            The freshly downloaded predictor.
+            The newly loaded predictor.
         """
-        with self._access_lock:
+        with self._lock:
             if not ticker:
                 predictor = load_predictor(self.registry, None)
                 self.default_ticker = predictor.metadata.ticker
-
                 return predictor
 
             return load_predictor(self.registry, ticker.upper())
 
     def list_loaded_models(self) -> list[AutoencoderModelMetadata]:
-        """List the metadata of every model in memory.
+        """List the metadata of the models currently in memory.
 
         Returns
         -------
         list[AutoencoderModelMetadata]
-            Metadata of the cached predictors, in the order their
-            models were loaded. wandb is never contacted.
+            Metadata of each loaded predictor, in loading order.
         """
-        with self._access_lock:
+        with self._lock:
             return [
                 predictor.metadata
                 for predictor in self.registry.models.values()
             ]
 
     def list_available_models(self) -> list[AvailableModel]:
-        """List the models the project could serve, newest first.
+        """List the model artifacts that can be loaded from wandb.
+
+        Nothing is downloaded. The result is sorted from the most recent
+        artifact to the oldest one.
 
         Returns
         -------
         list[AvailableModel]
-            One entry per servable artifact, sorted from the most
-            recently created to the oldest. Nothing is downloaded.
+            One entry per servable artifact, newest first.
         """
-        available_models = [
+        artifacts = sorted(
+            self.registry.list_available_artifacts(),
+            key=lambda artifact: artifact.created_at,
+            reverse=True,
+        )
+
+        return [
             AvailableModel(
-                artifact_name=(
-                    f"{artifact.name.split(':')[0]}:{artifact.version}"
-                ),
+                artifact_name=build_versioned_artifact_name(artifact),
                 ticker=str(artifact.metadata["ticker"]),
                 created_at=str(artifact.created_at),
             )
-            for artifact in self.registry.list_available_artifacts()
+            for artifact in artifacts
         ]
 
-        return sorted(
-            available_models,
-            key=lambda model: model.created_at,
-            reverse=True,
+
+def _build_registry_from_environment() -> (
+    WandbAutoencoderRegistry | LocalAutoencoderRegistry
+):
+    """Create the registry from the `AUTOENCODER_*` environment variables.
+
+    Returns
+    -------
+    WandbAutoencoderRegistry
+        Registry configured with the project, entity and device found in
+        the environment. Missing or empty variables use the defaults.
+    """
+    model_directory = os.getenv("AUTOENCODER_MODEL_DIR")
+    if model_directory:
+        return LocalAutoencoderRegistry(
+            model_directory=model_directory,
+            device=os.getenv("AUTOENCODER_DEVICE") or None,
         )
+
+    return WandbAutoencoderRegistry(
+        project_name=(
+            os.getenv("AUTOENCODER_WANDB_PROJECT")
+            or TrackingConfig.project_name
+        ),
+        entity=os.getenv("AUTOENCODER_WANDB_ENTITY") or None,
+        device=os.getenv("AUTOENCODER_DEVICE") or None,
+    )

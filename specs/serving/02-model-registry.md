@@ -1,6 +1,6 @@
 # 02 - Interface de registro de modelos
 
-- **Arquivo:** `src/generative_models/serving/model_registry.py`
+- **Arquivo:** `src/generative_models/registry/model_registry.py`
 - **Arquivo de teste:** `tests/generative_models/serving/test_model_registry.py`
 - **Depende de:** nenhuma
 - **Situação:** fornecido. O módulo e os testes já existem no repositório;

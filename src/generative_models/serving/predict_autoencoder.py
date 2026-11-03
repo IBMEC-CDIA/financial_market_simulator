@@ -1,12 +1,13 @@
-"""Command line script that scores a period with a trained model."""
+"""Command-line script that scores recent prices with a registered model."""
 
 import argparse
 from datetime import date, timedelta
 
+import numpy as np
 import pandas as pd
 
 from generative_models.data.market_data import fetch_price_series
-from generative_models.models.autoencoder.config import TrackingConfig
+from generative_models.models.base_autoencoder.config import TrackingConfig
 from generative_models.serving.autoencoder_predictor import (
     AutoencoderPrediction,
     AutoencoderPredictor,
@@ -15,58 +16,76 @@ from generative_models.serving.wandb_autoencoder_registry import (
     WandbAutoencoderRegistry,
 )
 
-DEFAULT_HISTORY_DAYS = 365
+DEFAULT_LOOKBACK_DAYS = 365
 DEFAULT_TOP_OUTLIERS = 5
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
-    """Build the parser of the prediction script.
+    """Create the parser of the prediction script.
+
+    The default period is the last 365 days, ending today. It is
+    computed when the parser is built.
 
     Returns
     -------
     argparse.ArgumentParser
-        Parser whose arguments are all optional: without a ticker the
-        most recent model of the project is served, and the default
-        period covers the last year.
+        Parser with the options `--ticker`, `--project-name`, `--entity`,
+        `--start-date`, `--end-date`, `--top-outliers` and `--device`.
 
     Example
     -------
-    >>> arguments = build_argument_parser().parse_args([])
-    >>> arguments.ticker is None
-    True
+    >>> arguments = build_argument_parser().parse_args(["--ticker", "AAPL"])
+    >>> arguments.top_outliers
+    5
     """
-    end_date = date.today()
-    start_date = end_date - timedelta(days=DEFAULT_HISTORY_DAYS)
+    today = date.today()
+    default_start_date = today - timedelta(days=DEFAULT_LOOKBACK_DAYS)
 
     parser = argparse.ArgumentParser(
-        description=(
-            "Score the log-return windows of a period with an "
-            "autoencoder registered in wandb."
-        )
+        description="Score recent prices with a registered autoencoder.",
     )
-    parser.add_argument("--ticker", type=str, default=None)
+    parser.add_argument(
+        "--ticker",
+        type=str,
+        default=None,
+        help="Ticker of the model to use. Defaults to the latest model.",
+    )
     parser.add_argument(
         "--project-name",
         type=str,
         default=TrackingConfig.project_name,
+        help="Name of the wandb project that holds the models.",
     )
-    parser.add_argument("--entity", type=str, default=None)
+    parser.add_argument(
+        "--entity",
+        type=str,
+        default=None,
+        help="wandb entity (user or team). Defaults to the account entity.",
+    )
     parser.add_argument(
         "--start-date",
         type=str,
-        default=start_date.isoformat(),
+        default=default_start_date.isoformat(),
+        help="First date of the price history (YYYY-MM-DD).",
     )
     parser.add_argument(
         "--end-date",
         type=str,
-        default=end_date.isoformat(),
+        default=today.isoformat(),
+        help="Last date of the price history (YYYY-MM-DD).",
     )
     parser.add_argument(
         "--top-outliers",
         type=int,
         default=DEFAULT_TOP_OUTLIERS,
+        help="Number of windows with the highest scores to print.",
     )
-    parser.add_argument("--device", type=str, default=None)
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Device where the model runs, for example cpu or cuda.",
+    )
 
     return parser
 
@@ -75,25 +94,24 @@ def build_prediction_table(
     price_data: pd.DataFrame,
     prediction: AutoencoderPrediction,
 ) -> pd.DataFrame:
-    """Align a prediction with the dates and prices it came from.
+    """Align the predicted windows with the dates of their prices.
+
+    The window whose last log-return has index `i` ends at the price
+    `i + 1`, so each row uses the price of that position.
 
     Parameters
     ----------
     price_data : pd.DataFrame
-        Prices indexed by date, with the closing price in the
-        `close_price` column.
+        Prices with a `close_price` column, indexed by date.
     prediction : AutoencoderPrediction
-        Prediction computed from the prices of `price_data`.
+        Prediction made from the `close_price` values of `price_data`.
 
     Returns
     -------
     pd.DataFrame
-        One row per window, indexed by the date of the price row that
-        closes the window, with the columns `close_price`,
-        `reconstruction_score` and `is_outlier`. A window ending at
-        the log-return index `i` refers to the return between the
-        prices `i` and `i + 1`, so the price row of the window is
-        `i + 1`.
+        One row per window, indexed by the date of the window's price,
+        with the columns `close_price`, `reconstruction_score` and
+        `is_outlier`, in this order.
 
     Example
     -------
@@ -101,17 +119,16 @@ def build_prediction_table(
     >>> list(table.columns)
     ['close_price', 'reconstruction_score', 'is_outlier']
     """
-    price_row_indices = prediction.window_end_indices + 1
+    price_row_positions = prediction.window_end_indices + 1
+    close_prices = price_data["close_price"].to_numpy()
 
     return pd.DataFrame(
         {
-            "close_price": price_data["close_price"].to_numpy()[
-                price_row_indices
-            ],
+            "close_price": close_prices[price_row_positions],
             "reconstruction_score": prediction.reconstruction_scores,
             "is_outlier": prediction.is_outlier,
         },
-        index=price_data.index[price_row_indices],
+        index=price_data.index[price_row_positions],
     )
 
 
@@ -119,20 +136,20 @@ def load_predictor(
     registry: WandbAutoencoderRegistry,
     ticker: str | None = None,
 ) -> AutoencoderPredictor:
-    """Load either the model of a ticker or the most recent one.
+    """Load the predictor of a ticker, or the latest one when no ticker.
 
     Parameters
     ----------
     registry : WandbAutoencoderRegistry
-        Registry used to read the models from wandb.
+        Registry that downloads the models from wandb.
     ticker : str | None
-        Ticker symbol to serve. When `None` or empty, the most
-        recently created model of the project is served.
+        Ticker symbol. When empty or `None`, the latest model of any
+        ticker is loaded.
 
     Returns
     -------
     AutoencoderPredictor
-        Predictor ready to score a series.
+        Predictor ready for inference.
     """
     if ticker:
         return registry.load_model(ticker)
@@ -145,28 +162,25 @@ def predict_period(
     start_date: str,
     end_date: str,
 ) -> pd.DataFrame:
-    """Score every window of a period of market data.
+    """Download the prices of a period and score every window of it.
 
     Parameters
     ----------
     predictor : AutoencoderPredictor
-        Predictor whose metadata names the ticker to download.
+        Predictor whose ticker is used to download the prices.
     start_date : str
-        Start date of the period, in `"YYYY-MM-DD"` format.
+        First date of the period, in `"YYYY-MM-DD"` format.
     end_date : str
-        End date of the period, in `"YYYY-MM-DD"` format.
+        Last date of the period, in `"YYYY-MM-DD"` format.
 
     Returns
     -------
     pd.DataFrame
-        Table returned by `build_prediction_table` for the downloaded
-        prices.
+        Prediction table, as built by `build_prediction_table`.
 
     Example
     -------
-    >>> table = predict_period(predictor, "2026-01-01", "2026-06-01")
-    >>> int(table["is_outlier"].sum())
-    4
+    >>> table = predict_period(predictor, "2026-01-01", "2026-06-30")
     """
     price_data = fetch_price_series(
         predictor.metadata.ticker,
@@ -180,100 +194,33 @@ def predict_period(
     return build_prediction_table(price_data, prediction)
 
 
-def _print_prediction_summary(
-    predictor: AutoencoderPredictor,
-    prediction_table: pd.DataFrame,
-    top_outliers: int,
-) -> None:
-    """Print a human-readable summary of a prediction.
-
-    Parameters
-    ----------
-    predictor : AutoencoderPredictor
-        Predictor that produced the table, used for the header.
-    prediction_table : pd.DataFrame
-        Table returned by `predict_period`.
-    top_outliers : int
-        Number of highest scoring windows to list.
-    """
-    metadata = predictor.metadata
-    number_of_windows = len(prediction_table)
-    number_of_outliers = int(prediction_table["is_outlier"].sum())
-    outlier_rate = (
-        100 * number_of_outliers / number_of_windows
-        if number_of_windows
-        else 0.0
-    )
-
-    print(f"Artifact: {metadata.artifact_name}")
-    print(f"Ticker: {metadata.ticker}")
-    print(f"Window size: {metadata.window_size}")
-    print(f"Anomaly threshold: {metadata.anomaly_threshold:.6f}")
-
-    if number_of_windows == 0:
-        print("No window could be scored for the requested period.")
-        return
-
-    print(
-        f"Period: {prediction_table.index[0].date()} to "
-        f"{prediction_table.index[-1].date()}"
-    )
-    print(f"Windows scored: {number_of_windows}")
-    print(f"Outlier windows: {number_of_outliers} ({outlier_rate:.2f}%)")
-    print(
-        "Mean reconstruction score: "
-        f"{prediction_table['reconstruction_score'].mean():.6f}"
-    )
-
-    print(f"Top {top_outliers} windows by reconstruction score:")
-    highest_scores = prediction_table.nlargest(
-        top_outliers,
-        "reconstruction_score",
-    )
-    for window_date, window_row in highest_scores.iterrows():
-        print(
-            f"  {window_date.date()} | "
-            f"close: {window_row['close_price']:.2f} | "
-            f"score: {window_row['reconstruction_score']:.6f} | "
-            f"outlier: {bool(window_row['is_outlier'])}"
-        )
-
-    last_window = prediction_table.iloc[-1]
-    last_status = (
-        "OUTLIER" if bool(last_window["is_outlier"]) else "normal"
-    )
-    print(
-        f"Last window ({prediction_table.index[-1].date()}): "
-        f"{last_status}"
-    )
-
-
 def main(
     command_line_arguments: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Score a period with a model registered in wandb.
+    """Run the prediction for a ticker and print a summary.
 
     Parameters
     ----------
     command_line_arguments : list[str] | None
-        Arguments to parse, without the program name. When `None`,
-        the arguments of `sys.argv` are used.
+        Arguments to parse. When `None`, the arguments of `sys.argv` are
+        used.
 
     Returns
     -------
     pd.DataFrame
-        Prediction table of the requested period, already summarized
-        on the standard output.
+        Prediction table of the period, as built by
+        `build_prediction_table`.
+
+    Raises
+    ------
+    SystemExit
+        If the arguments are malformed (raised by `argparse`).
 
     Example
     -------
-    >>> table = main(["--ticker", "PETR4.SA"])
-    >>> list(table.columns)
-    ['close_price', 'reconstruction_score', 'is_outlier']
+    >>> table = main(["--ticker", "PETR4.SA", "--top-outliers", "10"])
     """
-    parser = build_argument_parser()
-    arguments = parser.parse_args(command_line_arguments)
-
+    arguments = build_argument_parser().parse_args(command_line_arguments)
     registry = WandbAutoencoderRegistry(
         project_name=arguments.project_name,
         entity=arguments.entity,
@@ -285,14 +232,58 @@ def main(
         arguments.start_date,
         arguments.end_date,
     )
-
-    _print_prediction_summary(
-        predictor,
-        prediction_table,
-        arguments.top_outliers,
-    )
+    _print_summary(predictor, prediction_table, arguments.top_outliers)
 
     return prediction_table
+
+
+def _print_summary(
+    predictor: AutoencoderPredictor,
+    prediction_table: pd.DataFrame,
+    top_outliers: int,
+) -> None:
+    """Print the model, the period and the most anomalous windows.
+
+    Parameters
+    ----------
+    predictor : AutoencoderPredictor
+        Predictor that produced the table.
+    prediction_table : pd.DataFrame
+        Prediction table with at least one window.
+    top_outliers : int
+        Number of windows with the highest scores to list.
+    """
+    metadata = predictor.metadata
+    number_of_windows = len(prediction_table)
+    number_of_outliers = int(prediction_table["is_outlier"].sum())
+    outlier_percentage = 100 * number_of_outliers / number_of_windows
+    last_status = (
+        "OUTLIER" if prediction_table["is_outlier"].iloc[-1] else "normal"
+    )
+
+    print(f"Model: {metadata.artifact_name}")
+    print(f"Ticker: {metadata.ticker}")
+    print(f"Window size: {metadata.window_size}")
+    print(f"Anomaly threshold: {metadata.anomaly_threshold:.6f}")
+    print(
+        f"Period: {prediction_table.index[0]} to "
+        f"{prediction_table.index[-1]}"
+    )
+    print(
+        f"Windows: {number_of_windows} | Outliers: {number_of_outliers} "
+        f"({outlier_percentage:.2f}%)"
+    )
+    print(
+        "Mean reconstruction score: "
+        f"{np.mean(prediction_table['reconstruction_score']):.6f}"
+    )
+    print(f"Top {top_outliers} windows by reconstruction score:")
+    top_windows = prediction_table.nlargest(
+        top_outliers,
+        "reconstruction_score",
+    )
+    print(top_windows.to_string())
+    print(f"Last window: {last_status}")
 
 
 if __name__ == "__main__":

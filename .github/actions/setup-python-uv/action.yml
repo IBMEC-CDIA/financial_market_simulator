@@ -1,0 +1,18 @@
+name: Set up Python and uv
+description: >
+  Install uv, restore its package cache and install the project with the
+  dev dependencies. Run it after actions/checkout.
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10.0.1
+      with:
+        python-version: "3.12.10"
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - name: Install dependencies
+      shell: bash
+      run: uv sync --extra dev

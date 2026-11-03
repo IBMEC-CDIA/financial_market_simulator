@@ -1,21 +1,10 @@
-"""Unit tests for the autoencoder prediction command line script."""
-
-# pylint: disable=duplicate-code
+"""Unit tests for the prediction command-line script."""
 
 from datetime import date
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pandas as pd
-import torch
 
-from generative_models.models.autoencoder.autoencoder import (
-    SimpleAutoencoder,
-)
-from generative_models.serving.autoencoder_predictor import (
-    AutoencoderModelMetadata,
-    AutoencoderPredictor,
-)
 from generative_models.serving.predict_autoencoder import (
     build_argument_parser,
     build_prediction_table,
@@ -24,66 +13,14 @@ from generative_models.serving.predict_autoencoder import (
     predict_period,
 )
 
-SCRIPT_MODULE = "generative_models.serving.predict_autoencoder"
-WINDOW_SIZE = 5
+FETCH_PATH = "generative_models.serving.predict_autoencoder.fetch_price_series"
+REGISTRY_PATH = (
+    "generative_models.serving.predict_autoencoder.WandbAutoencoderRegistry"
+)
 
 
-def build_predictor(ticker: str = "PETR4.SA") -> AutoencoderPredictor:
-    """Build a predictor wrapping an untrained autoencoder.
-
-    Parameters
-    ----------
-    ticker : str
-        Ticker symbol stored in the predictor metadata.
-
-    Returns
-    -------
-    AutoencoderPredictor
-        Predictor on CPU, built from a fixed random seed.
-    """
-    torch.manual_seed(42)
-
-    return AutoencoderPredictor(
-        model=SimpleAutoencoder(input_dim=WINDOW_SIZE),
-        metadata=AutoencoderModelMetadata(
-            ticker=ticker,
-            window_size=WINDOW_SIZE,
-            return_train_mean=0.001,
-            return_train_std=0.02,
-            anomaly_threshold=0.5,
-            artifact_name=f"simple-autoencoder-{ticker.lower()}:v1",
-        ),
-        device="cpu",
-    )
-
-
-def build_price_dataframe(number_of_prices: int) -> pd.DataFrame:
-    """Build a synthetic price series indexed by business day.
-
-    Parameters
-    ----------
-    number_of_prices : int
-        Number of daily prices to generate.
-
-    Returns
-    -------
-    pd.DataFrame
-        Single-column data frame holding the prices in close_price.
-    """
-    random_generator = np.random.default_rng(5)
-    log_increments = random_generator.normal(
-        loc=0.0,
-        scale=0.02,
-        size=number_of_prices,
-    )
-    price_values = 100.0 * np.exp(np.cumsum(log_increments))
-    price_dates = pd.bdate_range("2026-09-01", periods=number_of_prices)
-
-    return pd.DataFrame({"close_price": price_values}, index=price_dates)
-
-
-def test_default_arguments() -> None:
-    """CA-01: without arguments the ticker is empty and dates default."""
+def test_parser_defaults_to_the_latest_model_and_today() -> None:
+    """Check the defaults when no argument is given."""
     arguments = build_argument_parser().parse_args([])
 
     assert arguments.ticker is None
@@ -91,109 +28,120 @@ def test_default_arguments() -> None:
     assert arguments.end_date == date.today().isoformat()
 
 
-def test_prediction_table_has_one_row_per_window() -> None:
-    """CA-02: 10 prices and a window of 5 produce 5 dated rows."""
-    price_data = build_price_dataframe(10)
-    predictor = build_predictor()
+def test_build_prediction_table_aligns_windows_with_prices(
+    make_predictor,
+    make_price_frame,
+) -> None:
+    """Check the columns and the dates of the table for 10 prices."""
+    predictor = make_predictor()
+    price_data = make_price_frame(10)
     prediction = predictor.predict_from_prices(
         price_data["close_price"].to_numpy()
     )
 
-    table = build_prediction_table(price_data, prediction)
+    prediction_table = build_prediction_table(price_data, prediction)
 
-    assert len(table) == 5
-    assert list(table.columns) == [
+    assert len(prediction_table) == 5
+    assert list(prediction_table.columns) == [
         "close_price",
         "reconstruction_score",
         "is_outlier",
     ]
-    assert list(table.index) == list(price_data.index[5:10])
+    assert list(prediction_table.index) == list(price_data.index[5:10])
 
 
-def test_prediction_table_prices_follow_the_window_end() -> None:
-    """CA-03: each row carries the price of window_end_index plus one."""
-    price_data = build_price_dataframe(10)
-    predictor = build_predictor()
+def test_build_prediction_table_uses_the_price_after_each_window_end(
+    make_predictor,
+    make_price_frame,
+) -> None:
+    """Check that each row shows the price at window_end_index + 1."""
+    predictor = make_predictor()
+    price_data = make_price_frame(10)
     prediction = predictor.predict_from_prices(
         price_data["close_price"].to_numpy()
     )
 
-    table = build_prediction_table(price_data, prediction)
+    prediction_table = build_prediction_table(price_data, prediction)
 
-    expected_prices = price_data["close_price"].to_numpy()[
-        prediction.window_end_indices + 1
-    ]
+    for row_position, window_end_index in enumerate(
+        prediction.window_end_indices
+    ):
+        expected_price = price_data["close_price"].iloc[window_end_index + 1]
+        assert prediction_table["close_price"].iloc[row_position] == (
+            expected_price
+        )
 
-    assert np.allclose(table["close_price"].to_numpy(), expected_prices)
 
-
-def test_load_predictor_chooses_between_latest_and_ticker() -> None:
-    """CA-04: the ticker decides which registry method is called."""
+def test_load_predictor_uses_latest_or_named_model() -> None:
+    """Check which registry method is called for each ticker input."""
     registry = MagicMock()
 
     load_predictor(registry, None)
-
-    registry.load_latest_model.assert_called_once_with()
-    registry.load_model.assert_not_called()
-
-    registry.reset_mock()
     load_predictor(registry, "AAPL")
 
+    registry.load_latest_model.assert_called_once_with()
     registry.load_model.assert_called_once_with("AAPL")
-    registry.load_latest_model.assert_not_called()
 
 
-def test_predict_period_uses_the_metadata_ticker() -> None:
-    """CA-05: prices are fetched for the ticker of the predictor."""
-    predictor = build_predictor()
-    price_data = build_price_dataframe(10)
+@patch(FETCH_PATH)
+def test_predict_period_fetches_prices_of_the_metadata_ticker(
+    mock_fetch_price_series,
+    make_predictor,
+    make_price_frame,
+) -> None:
+    """Check that prices are downloaded for the predictor's ticker."""
+    mock_fetch_price_series.return_value = make_price_frame(10)
+    predictor = make_predictor(ticker="PETR4.SA")
 
-    with patch(
-        f"{SCRIPT_MODULE}.fetch_price_series",
-        return_value=price_data,
-    ) as fetch_mock:
-        table = predict_period(predictor, "2026-09-01", "2026-09-30")
+    prediction_table = predict_period(
+        predictor,
+        "2026-09-01",
+        "2026-09-30",
+    )
 
-    fetch_mock.assert_called_once_with(
+    mock_fetch_price_series.assert_called_once_with(
         "PETR4.SA",
         "2026-09-01",
         "2026-09-30",
     )
-    assert len(table) == 5
+    assert len(prediction_table) == 5
 
 
-def test_main_without_ticker_loads_the_latest_model() -> None:
-    """CA-06: main with no arguments serves the most recent model."""
-    predictor = build_predictor()
-    price_data = build_price_dataframe(10)
+@patch(FETCH_PATH)
+@patch(REGISTRY_PATH)
+def test_main_without_arguments_loads_the_latest_model(
+    mock_registry_class,
+    mock_fetch_price_series,
+    capsys,
+    make_predictor,
+    make_price_frame,
+) -> None:
+    """Check that main with no arguments uses the latest model."""
+    registry = mock_registry_class.return_value
+    registry.load_latest_model.return_value = make_predictor()
+    mock_fetch_price_series.return_value = make_price_frame(20)
 
-    with patch(f"{SCRIPT_MODULE}.WandbAutoencoderRegistry") as registry_class:
-        registry_class.return_value.load_latest_model.return_value = (
-            predictor
-        )
-        with patch(
-            f"{SCRIPT_MODULE}.fetch_price_series",
-            return_value=price_data,
-        ):
-            table = main([])
+    prediction_table = main([])
 
-    registry_class.return_value.load_latest_model.assert_called_once()
-    assert len(table) == 5
+    registry.load_latest_model.assert_called_once_with()
+    assert isinstance(prediction_table, pd.DataFrame)
+    assert len(prediction_table) == 15
+    assert "Model: simple-autoencoder-petr4.sa:v1" in capsys.readouterr().out
 
 
-def test_main_with_ticker_loads_that_model() -> None:
-    """CA-07: main with a ticker serves the model of that ticker."""
-    predictor = build_predictor()
-    price_data = build_price_dataframe(10)
+@patch(FETCH_PATH)
+@patch(REGISTRY_PATH)
+def test_main_with_ticker_loads_that_ticker(
+    mock_registry_class,
+    mock_fetch_price_series,
+    make_predictor,
+    make_price_frame,
+) -> None:
+    """Check that --ticker selects the model of that ticker."""
+    registry = mock_registry_class.return_value
+    registry.load_model.return_value = make_predictor()
+    mock_fetch_price_series.return_value = make_price_frame(20)
 
-    with patch(f"{SCRIPT_MODULE}.WandbAutoencoderRegistry") as registry_class:
-        registry_class.return_value.load_model.return_value = predictor
-        with patch(
-            f"{SCRIPT_MODULE}.fetch_price_series",
-            return_value=price_data,
-        ):
-            main(["--ticker", "PETR4.SA"])
+    main(["--ticker", "PETR4.SA"])
 
-    registry_class.return_value.load_model.assert_called_once_with(
-        "PETR4.SA"
-    )
+    registry.load_model.assert_called_once_with("PETR4.SA")

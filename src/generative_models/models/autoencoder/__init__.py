@@ -1,18 +1,16 @@
-"""Dense autoencoder model, configuration and training pipeline."""
+"""Alias of the base autoencoder package, kept for the old import path."""
 
-from generative_models.models.autoencoder.autoencoder import (
-    SimpleAutoencoder,
-)
-from generative_models.models.autoencoder.config import (
+# pylint: disable=duplicate-code
+
+from generative_models.models.base_autoencoder import (
     AutoencoderArchitectureConfig,
+    AutoencoderTrainer,
     AutoencoderTrainingConfig,
+    AutoencoderTrainingResult,
     MarketDataConfig,
     OptimizationConfig,
+    SimpleAutoencoder,
     TrackingConfig,
-)
-from generative_models.models.autoencoder.trainer import (
-    AutoencoderTrainer,
-    AutoencoderTrainingResult,
 )
 
 __all__ = [

@@ -1,19 +1,37 @@
 """Unit tests for TickerModelManager."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
+from generative_models.models.base_autoencoder.trainer_factory import (
+    build_trainer,
+)
 from generative_models.models.ticker_model_manager import TickerModelManager
 
+BUILD_DATASET_PATH = (
+    "generative_models.models.ticker_model_manager.build_price_dataset"
+)
 
-def _build_manager() -> TickerModelManager:
+
+def _build_manager(trainer_factory=None) -> TickerModelManager:
+    """Create a manager with two tickers and an optional trainer factory."""
     return TickerModelManager(
         tickers={
             "AAPL": {"start_date": "2020-01-01", "end_date": "2026-01-01"},
             "MSFT": {"start_date": "2021-01-01", "end_date": "2026-01-01"},
-        }
+        },
+        trainer_factory=trainer_factory,
     )
+
+
+def _make_factory() -> MagicMock:
+    """Create a trainer factory whose trainers return a fake result."""
+    factory = MagicMock()
+    factory.return_value.train.return_value = MagicMock(name="result")
+
+    return factory
 
 
 def test_constructor_stores_tickers_configuration() -> None:
@@ -34,26 +52,65 @@ def test_constructor_starts_with_no_trained_models() -> None:
     assert not manager.models
 
 
-@pytest.mark.parametrize(
-    "method_name, args",
-    [
-        ("list_tickers", ()),
-        ("get_date_range", ("AAPL",)),
-        ("fetch_price_data", ("AAPL",)),
-        ("train_model", ("AAPL",)),
-        ("train_all_models", ()),
-        ("get_model", ("AAPL",)),
-    ],
-)
-def test_unimplemented_methods_raise_not_implemented_error(
-    method_name: str,
-    args: tuple,
-) -> None:
-    """Check that every skeleton method still raises NotImplementedError."""
+def test_default_trainer_factory_is_the_base_autoencoder() -> None:
+    """Check that the default factory is the base autoencoder builder."""
     manager = _build_manager()
 
-    with pytest.raises(NotImplementedError):
-        getattr(manager, method_name)(*args)
+    assert manager.trainer_factory is build_trainer
+
+
+def test_list_tickers_keeps_the_constructor_order() -> None:
+    """Check that the tickers are listed in the order they were given."""
+    manager = _build_manager()
+
+    assert manager.list_tickers() == ["AAPL", "MSFT"]
+
+
+def test_get_date_range_returns_the_configured_dates() -> None:
+    """Check that the start and end dates of a ticker are returned."""
+    manager = _build_manager()
+
+    assert manager.get_date_range("MSFT") == ("2021-01-01", "2026-01-01")
+
+
+def test_get_date_range_rejects_an_unknown_ticker() -> None:
+    """Check that an unknown ticker raises KeyError."""
+    manager = _build_manager()
+
+    with pytest.raises(KeyError):
+        manager.get_date_range("PETR4.SA")
+
+
+def test_fetch_price_data_uses_the_ticker_dates() -> None:
+    """Check that the prices are built for the dates of the ticker."""
+    manager = _build_manager()
+    expected_dataset = pd.DataFrame({"close_price": [1.0]})
+
+    with patch(
+        BUILD_DATASET_PATH, return_value=expected_dataset
+    ) as mock_build_dataset:
+        dataset = manager.fetch_price_data("AAPL")
+
+    assert dataset is expected_dataset
+    assert mock_build_dataset.call_args.args[:3] == (
+        "AAPL",
+        "2020-01-01",
+        "2026-01-01",
+    )
+
+
+def test_train_model_creates_trains_and_stores_the_result() -> None:
+    """Check that the trainer of the ticker runs and its result is kept."""
+    factory = _make_factory()
+    manager = _build_manager(trainer_factory=factory)
+    price_data = pd.DataFrame({"close_price": [1.0]})
+
+    with patch(BUILD_DATASET_PATH, return_value=price_data):
+        result = manager.train_model("AAPL")
+
+    factory.assert_called_once_with("AAPL", price_data)
+    assert result is factory.return_value.train.return_value
+    assert manager.get_model("AAPL") is result
 
 
 def test_train_all_models_trains_every_ticker_in_order() -> None:
@@ -119,11 +176,9 @@ def test_train_all_models_stops_at_first_failure() -> None:
     mock_train_model.assert_called_once_with("AAPL")
 
 
-def test_train_all_models_returns_none() -> None:
-    """Check that train_all_models has no return value."""
+def test_get_model_rejects_a_ticker_not_trained_yet() -> None:
+    """Check that asking for an untrained model raises KeyError."""
     manager = _build_manager()
 
-    with patch.object(
-        TickerModelManager, "list_tickers", return_value=["AAPL"]
-    ), patch.object(TickerModelManager, "train_model"):
-        assert manager.train_all_models() is None
+    with pytest.raises(KeyError, match="train_model"):
+        manager.get_model("AAPL")
