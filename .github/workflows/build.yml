@@ -4,7 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       train_run_id:
-        description: "Run id of a successful Train workflow whose trained models are copied into the image. Leave empty to use the latest successful Train run of this branch."
+        description: "Run id of a successful Train workflow whose trained models are copied into the image. Leave empty to download the latest registered models of the tickers from W&B."
+        required: false
+        default: ""
+        type: string
+      tickers:
+        description: "Comma-separated tickers whose latest registered models are downloaded from W&B, for example PETR4.SA,AAPL. Required when train_run_id is empty."
+        required: false
+        default: ""
+        type: string
+      wandb_api_key:
+        description: "W&B API key used when train_run_id is empty. Leave empty to use the WANDB_API_KEY secret. Typed values are not masked by GitHub in the form, so prefer the secret."
         required: false
         default: ""
         type: string
@@ -68,34 +78,47 @@ jobs:
       IMAGE_NAME: financial-market-simulator:${{ github.sha }}
       GH_TOKEN: ${{ github.token }}
       TRAIN_RUN_ID: ${{ inputs.train_run_id }}
+      TICKERS: ${{ inputs.tickers }}
+      WANDB_API_KEY: ${{ inputs.wandb_api_key || secrets.WANDB_API_KEY }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download the trained models into the build context
+      - name: Hide the W&B key from the logs
         run: |
-          run_id="$TRAIN_RUN_ID"
-          if [ -z "$run_id" ]; then
-            run_id=$(gh run list \
-              --repo "$GITHUB_REPOSITORY" \
-              --workflow train.yml \
-              --branch "$GITHUB_REF_NAME" \
-              --status success \
-              --limit 1 \
-              --json databaseId \
-              --jq '.[0].databaseId')
+          if [ -n "$WANDB_API_KEY" ]; then
+            echo "::add-mask::$WANDB_API_KEY"
           fi
-          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
-            echo "No successful Train run was found for the models."
+
+      - name: Check the model source inputs
+        run: |
+          if [ -z "$TRAIN_RUN_ID" ] && [ -z "$TICKERS" ]; then
+            echo "Tickers are required when train_run_id is empty: fill in the tickers input."
             exit 1
           fi
-          echo "Using the trained models of run $run_id."
+          if [ -z "$TRAIN_RUN_ID" ] && [ -z "$WANDB_API_KEY" ]; then
+            echo "A W&B API key is required when train_run_id is empty: fill in wandb_api_key or set the WANDB_API_KEY secret."
+            exit 1
+          fi
+          echo "Model source inputs are valid."
+
+      - name: Download the trained models of a Train run
+        if: inputs.train_run_id != ''
+        run: |
+          echo "Using the trained models of run $TRAIN_RUN_ID."
           mkdir -p models
-          gh run download "$run_id" \
-            --repo "$GITHUB_REPOSITORY" \
-            --name trained-models \
-            --dir models
+          gh run download "$TRAIN_RUN_ID"             --repo "$GITHUB_REPOSITORY"             --name trained-models             --dir models
+          ls -l models
+
+      - name: Set up Python and uv
+        if: inputs.train_run_id == ''
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Download the latest registered models from W&B
+        if: inputs.train_run_id == ''
+        run: |
+          uv run python -m generative_models.serving.download_latest_models             --tickers "$TICKERS"             --output-directory models
           ls -l models
 
       - name: Set up Docker Buildx

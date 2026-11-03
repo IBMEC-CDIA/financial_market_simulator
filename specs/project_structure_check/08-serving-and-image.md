@@ -43,9 +43,19 @@ ignorado.
 ## Build da imagem (`build.yml`)
 
 1. O job `ci-check` confirma que o CI passou para o commit.
-2. O job `build-image` baixa o artifact `trained-models` de um run do
-   `train.yml`, para a pasta `models/`. O run é o indicado em
-   `train_run_id`, ou o último com sucesso da branch.
+2. O job `build-image` preenche a pasta `models/` de uma destas formas:
+   - com `train_run_id` informado, baixa o artifact `trained-models` desse
+     run do `train.yml`;
+   - sem `train_run_id`, baixa a versão `latest` do artifact
+     `simple-autoencoder-<ticker>` de cada ticker do input `tickers`, pelo
+     módulo `generative_models.serving.download_latest_models`. Esse modo
+     precisa da chave do wandb (input `wandb_api_key` ou secret
+     `WANDB_API_KEY`). O módulo grava `<nome>.pt` e
+     `<nome>-overfitting.json`, que o registro local lê. Os campos
+     `test_loss` e `baseline_test_loss` ficam `null`, porque o artifact do
+     wandb não os guarda.
+     O comportamento completo está na
+     [spec 09 da trilha de serving](../serving/09-latest-model-download.md).
 3. A imagem é construída. O Dockerfile copia `models/` para `/app/models` e
    define `AUTOENCODER_MODEL_DIR=/app/models`.
 4. Um teste de fumaça sobe o container e confere `/health`, que
@@ -67,7 +77,10 @@ ignorado.
 | Ticker sem modelo na pasta | `404` |
 | Janela de log-retornos menor que a do modelo | `422` |
 | Pasta sem modelos completos | a API sobe com a lista vazia; `/models/loaded` retorna `[]` |
-| Nenhum run de treino com sucesso no build | o job `build-image` falha |
+| Sem `train_run_id` e sem `tickers` | o job `build-image` falha antes do download |
+| Sem `train_run_id` e sem chave do wandb | o job `build-image` falha antes do download |
+| Ticker sem artifact `latest` no wandb | o job `build-image` falha antes do build |
+| `train_run_id` de um run sem o artifact `trained-models` | o job `build-image` falha |
 
 ## Critérios de aceite
 
@@ -76,8 +89,11 @@ ignorado.
 - **CA-02:** uma predição com o ticker `MSFT` usa o modelo de `MSFT`.
 - **CA-03:** um ticker sem modelo responde `404`.
 - **CA-04:** um relatório sem o `.pt` correspondente não é listado.
-- **CA-05:** a imagem leva `models/` e define `AUTOENCODER_MODEL_DIR`, e o
-  build não recebe a chave do wandb.
+- **CA-05:** a imagem leva `models/` e define `AUTOENCODER_MODEL_DIR`. A
+  chave do wandb só é usada no modo sem `train_run_id`, e somente para
+  baixar os modelos antes do build.
+- **CA-06:** o modo sem `train_run_id` grava, para cada ticker, o `.pt` e o
+  `-overfitting.json` com os campos que o registro local exige.
 
 ## Limites
 

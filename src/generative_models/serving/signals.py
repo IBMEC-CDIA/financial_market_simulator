@@ -4,6 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
+import pandas as pd
+
 from generative_models.serving.api_schemas import SignalItem
 from generative_models.serving.autoencoder_predictor import (
     AutoencoderModelMetadata,
@@ -11,6 +13,7 @@ from generative_models.serving.autoencoder_predictor import (
 
 MAXIMUM_MODEL_NAME_LENGTH = 60
 MAXIMUM_REASON_LENGTH = 280
+MINIMUM_WINDOWS_FOR_SIGNAL = 2
 
 
 @dataclass(frozen=True)
@@ -32,25 +35,114 @@ class SignalDecision:
     reason: str | None = None
 
 
-SignalRule = Callable[[AutoencoderModelMetadata], SignalDecision | None]
-
-# The rule that turns an anomaly into buy, sell or hold is still a team
-# decision. Until it is set, no signal is generated and GET /signals returns
-# an empty list.
-DEFAULT_SIGNAL_RULE: SignalRule | None = None
+SignalRule = Callable[
+    [AutoencoderModelMetadata, pd.DataFrame],
+    SignalDecision | None,
+]
 
 
-def build_signals(
-    metadatas: list[AutoencoderModelMetadata],
-    rule: SignalRule | None,
-    generated_at: datetime,
-) -> list[SignalItem]:
-    """Turn the loaded models into signal items.
+def clip_confidence(value: float) -> float:
+    """Limit a confidence value to the interval from 0 to 1.
 
     Parameters
     ----------
-    metadatas : list[AutoencoderModelMetadata]
-        Metadata of the models currently in memory.
+    value : float
+        Raw confidence value.
+
+    Returns
+    -------
+    float
+        `value` limited to the interval from 0 to 1 inclusive.
+
+    Example
+    -------
+    >>> clip_confidence(1.7)
+    1.0
+    """
+    return min(max(value, 0.0), 1.0)
+
+
+def default_signal_rule(
+    metadata: AutoencoderModelMetadata,
+    prediction_table: pd.DataFrame,
+) -> SignalDecision | None:
+    """Turn the most recent window of a model into a signal.
+
+    The most recent window is compared with the anomaly threshold of the
+    model. When it is within the threshold, the action is `"hold"` and
+    the confidence grows as the score gets further below the threshold.
+    When it is above the threshold, the action follows the last daily
+    move of the price: an abnormal drop gives `"buy"`, an abnormal rise
+    gives `"sell"`, and no move gives `"hold"`. The confidence grows as
+    the score gets further above the threshold.
+
+    Parameters
+    ----------
+    metadata : AutoencoderModelMetadata
+        Training metadata of the model, with the anomaly threshold.
+    prediction_table : pd.DataFrame
+        Prediction table with the columns `close_price` and
+        `reconstruction_score`, one row per window, in date order.
+
+    Returns
+    -------
+    SignalDecision | None
+        The decision, or `None` when there are fewer than two windows or
+        the threshold is not positive, so no signal can be computed.
+
+    Example
+    -------
+    >>> decision = default_signal_rule(metadata, prediction_table)
+    >>> decision.action
+    'sell'
+    """
+    threshold = metadata.anomaly_threshold
+    if len(prediction_table) < MINIMUM_WINDOWS_FOR_SIGNAL or threshold <= 0:
+        return None
+
+    last_score = float(prediction_table["reconstruction_score"].iloc[-1])
+    last_close = float(prediction_table["close_price"].iloc[-1])
+    previous_close = float(prediction_table["close_price"].iloc[-2])
+
+    if last_score <= threshold:
+        return SignalDecision(
+            action="hold",
+            confidence=clip_confidence(1 - last_score / threshold),
+        )
+
+    confidence = clip_confidence((last_score - threshold) / threshold)
+    reason = (
+        f"Janela de {metadata.window_size} dias com erro de reconstrução "
+        "acima do limite."
+    )
+    if last_close < previous_close:
+        return SignalDecision(
+            action="buy",
+            confidence=confidence,
+            reason=reason,
+        )
+    if last_close > previous_close:
+        return SignalDecision(
+            action="sell",
+            confidence=confidence,
+            reason=reason,
+        )
+
+    return SignalDecision(action="hold", confidence=confidence, reason=reason)
+
+
+def build_signals(
+    prediction_tables: list[tuple[AutoencoderModelMetadata, pd.DataFrame]],
+    rule: SignalRule | None,
+    generated_at: datetime,
+) -> list[SignalItem]:
+    """Turn the recent predictions of the models into signal items.
+
+    Parameters
+    ----------
+    prediction_tables : list[tuple[AutoencoderModelMetadata, pd.DataFrame]]
+        For each model, its metadata and its recent prediction table, as
+        built by `build_prediction_table`.
     rule : SignalRule | None
         Function that decides the signal of one model. When `None`, no
         signal is generated.
@@ -66,15 +158,14 @@ def build_signals(
 
     Example
     -------
-    >>> build_signals(metadatas, None, datetime.now(UTC))
-    []
+    >>> build_signals(tables, default_signal_rule, datetime.now(UTC))
     """
     if rule is None:
         return []
 
     items = []
-    for metadata in metadatas:
-        decision = rule(metadata)
+    for metadata, prediction_table in prediction_tables:
+        decision = rule(metadata, prediction_table)
         if decision is None:
             continue
         model_name = metadata.artifact_name

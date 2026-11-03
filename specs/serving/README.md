@@ -26,6 +26,8 @@ todas as specs de treino estiverem verdes.
 | 05 | [Serviço de modelos (singleton)](05-model-service.md) | `serving/model_service.py` | A implementar | 03, 04 |
 | 06 | [Schemas da API](06-api-schemas.md) | `serving/api_schemas.py` | A implementar | - |
 | 07 | [API REST](07-api.md) | `serving/api.py` | A implementar | 01, 04, 05, 06 |
+| 08 | [Contrato de saída do GET /signals](08-signals-contract.md) | `serving/signals.py` | A implementar | 01, 05, 06, 07 |
+| 09 | [Download dos modelos mais recentes](09-latest-model-download.md) | `serving/download_latest_models.py` | Implementado | 03, 04, `training/07` |
 
 Os caminhos de **Arquivo** são relativos a `src/generative_models/`.
 Os testes ficam em `tests/generative_models/serving/`.
