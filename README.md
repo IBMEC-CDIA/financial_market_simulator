@@ -429,6 +429,24 @@ The Docker Hub account and token are taken from the `dockerhub_username` and
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.
 
+### Signals endpoint (`GET /signals`)
+
+`GET /signals` returns a list with one trading suggestion for each loaded
+asset that has a signal. The list is empty while the signal rule is not set,
+and when no asset has a signal. Each item has these fields:
+
+- `symbol`: ticker in upper case, for example `"AAPL"`.
+- `action`: `"buy"`, `"sell"` or `"hold"`.
+- `confidence`: a number between 0 and 1.
+- `generated_at`: the generation time in ISO 8601, in UTC.
+- `model`: the model name, up to 60 characters, or `null`.
+- `reason`: a plain explanation based only on the model numbers, up to 280
+  characters, or `null`.
+
+The rule that turns an anomaly into an action is a team decision. It is
+defined in `generative_models.serving.signals`, in `DEFAULT_SIGNAL_RULE`. Until
+then, the answer is `[]`. These suggestions are not investment advice.
+
 ### Ticker model manager
 
 `TickerModelManager` (`models/ticker_model_manager.py`) trains the model of

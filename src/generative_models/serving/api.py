@@ -4,7 +4,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
 import numpy as np
@@ -33,7 +33,9 @@ from generative_models.serving.autoencoder_predictor import (
 from generative_models.serving.model_service import (
     AutoencoderModelService,
 )
+from generative_models.serving import signals as signal_rules
 from generative_models.serving.predict_autoencoder import predict_period
+from generative_models.serving.signals import SignalItem, build_signals
 
 DEFAULT_LOOKBACK_DAYS = 365
 PRELOAD_ENVIRONMENT_VARIABLE = "AUTOENCODER_PRELOAD_MODEL"
@@ -126,6 +128,12 @@ app = FastAPI(
         {
             "name": "Predictions",
             "description": "Detect outlier windows in log-returns or prices.",
+        },
+        {
+            "name": "Signals",
+            "description": (
+                "Buy, sell or hold suggestions of the loaded assets."
+            ),
         },
     ],
     lifespan=lifespan,
@@ -597,6 +605,29 @@ def predict_from_market_data(
         prediction_table,
     )
 
+
+
+@app.get(
+    "/signals",
+    tags=["Signals"],
+    summary="List the buy, sell or hold suggestions of the loaded assets",
+    description=(
+        "One item for each loaded asset that has a signal. The list is empty "
+        "when no signal rule is set or when no asset has a signal. Each item "
+        "has the symbol, the action, a confidence between 0 and 1, the "
+        "UTC generation time, and optionally the model name and a plain "
+        "reason based only on the model numbers. This is not investment "
+        "advice."
+    ),
+    response_model=list[SignalItem],
+)
+def get_signals(service: ModelServiceDependency) -> list[SignalItem]:
+    """Return the signals of the models in memory, or an empty list."""
+    return build_signals(
+        service.list_loaded_models(),
+        signal_rules.DEFAULT_SIGNAL_RULE,
+        datetime.now(UTC),
+    )
 
 def main(
     host: str = "127.0.0.1",

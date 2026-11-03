@@ -1,9 +1,14 @@
 """Request and response schemas of the autoencoder prediction API."""
 
-from datetime import date
-from typing import Annotated
+from datetime import UTC, date, datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 SAMPLE_LOG_RETURNS = [
     0.01,
@@ -318,3 +323,73 @@ class ErrorResponse(BaseModel):
         description="Human-readable description of the error.",
         examples=["No model loaded for ticker 'AAPL'. Call load_model first."],
     )
+
+
+class SignalItem(BaseModel):
+    """Trading suggestion of one loaded asset.
+
+    Parameters
+    ----------
+    symbol : str
+        Ticker symbol in upper case, for example `"AAPL"`.
+    action : Literal["buy", "sell", "hold"]
+        Suggested action.
+    confidence : float
+        Confidence of the suggestion, between 0 and 1 inclusive.
+    generated_at : datetime
+        Moment the suggestion was generated, in UTC.
+    model : str | None
+        Name of the model that produced the suggestion, up to 60 characters.
+    reason : str | None
+        Plain explanation based only on the model numbers, up to 280
+        characters.
+    """
+
+    symbol: str = Field(
+        min_length=1,
+        description="Ticker symbol in upper case.",
+        examples=["AAPL"],
+    )
+    action: Literal["buy", "sell", "hold"] = Field(
+        description="Suggested action.",
+        examples=["hold"],
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Confidence of the suggestion, between 0 and 1.",
+        examples=[0.75],
+    )
+    generated_at: datetime = Field(
+        description="Moment the suggestion was generated, in UTC.",
+        examples=["2026-11-02T12:00:00Z"],
+    )
+    model: str | None = Field(
+        default=None,
+        max_length=60,
+        description="Name of the model that produced the suggestion.",
+        examples=["simple-autoencoder-aapl"],
+    )
+    reason: str | None = Field(
+        default=None,
+        max_length=280,
+        description="Plain explanation based only on the model numbers.",
+        examples=[
+            "Janela de 10 dias com erro de reconstrucao acima do limite."
+        ],
+    )
+
+    @field_validator("symbol")
+    @classmethod
+    def symbol_in_upper_case(cls, value: str) -> str:
+        """Store the ticker in upper case."""
+        return value.upper()
+
+    @field_validator("generated_at")
+    @classmethod
+    def generated_at_in_utc(cls, value: datetime) -> datetime:
+        """Require a timezone and convert the moment to UTC."""
+        if value.tzinfo is None:
+            raise ValueError("generated_at must include a timezone.")
+
+        return value.astimezone(UTC)
