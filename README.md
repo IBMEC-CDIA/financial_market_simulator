@@ -431,9 +431,12 @@ unless every job before it succeeded.
 
 ### Signals endpoint (`GET /signals`)
 
-`GET /signals` returns a list with one trading suggestion for each loaded
-asset that has a signal. The list is empty while the signal rule is not set,
-and when no asset has a signal. Each item has these fields:
+`GET /signals?ticker=PETR4.SA` returns a list with the trading suggestion of
+one asset, when its model has a signal. The `ticker` parameter is required.
+The optional `start_date` and `end_date` parameters (`YYYY-MM-DD`) set the
+period, and default to the last 365 days, as in the market data route. The
+list is empty when the period has too few prices or when no rule is set. An
+unknown ticker answers `404`. Each item has these fields:
 
 - `symbol`: ticker in upper case, for example `"AAPL"`.
 - `action`: `"buy"`, `"sell"` or `"hold"`.
@@ -443,9 +446,15 @@ and when no asset has a signal. Each item has these fields:
 - `reason`: a plain explanation based only on the model numbers, up to 280
   characters, or `null`.
 
-The rule that turns an anomaly into an action is a team decision. It is
-defined in `generative_models.serving.signals`, in `DEFAULT_SIGNAL_RULE`. Until
-then, the answer is `[]`. These suggestions are not investment advice.
+The default rule, `default_signal_rule` in `generative_models.serving.signals`,
+looks at the most recent window. A window within the anomaly threshold gives
+`hold`. An abnormal window gives `buy` after a price drop, `sell` after a price
+rise, and `hold` when the price did not move. This rule is a proposal that the
+team still has to confirm. Setting `signal_rules.default_signal_rule` to `None`
+turns the answer into `[]`. These suggestions are not investment advice.
+
+The output format is fixed by
+[`specs/serving/08-signals-contract.md`](specs/serving/08-signals-contract.md).
 
 ### Ticker model manager
 

@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta, timezone
 
+import pandas as pd
 import pytest
 from pydantic import ValidationError
 
@@ -12,20 +13,44 @@ from generative_models.serving.autoencoder_predictor import (
 from generative_models.serving.signals import (
     SignalDecision,
     build_signals,
+    clip_confidence,
+    default_signal_rule,
 )
 
 GENERATED_AT = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
+THRESHOLD = 1.0
 
 
-def _metadata(ticker: str, artifact_name: str) -> AutoencoderModelMetadata:
+def _metadata(
+    ticker: str,
+    artifact_name: str,
+    anomaly_threshold: float = THRESHOLD,
+) -> AutoencoderModelMetadata:
     """Build the metadata of a model for the tests."""
     return AutoencoderModelMetadata(
         ticker=ticker,
         window_size=10,
         return_train_mean=0.0,
         return_train_std=0.02,
-        anomaly_threshold=1.3,
+        anomaly_threshold=anomaly_threshold,
         artifact_name=artifact_name,
+    )
+
+
+def _prediction_table(
+    closes: list[float],
+    scores: list[float],
+) -> pd.DataFrame:
+    """Build a prediction table with one row per window."""
+    dates = pd.date_range("2026-10-01", periods=len(closes), freq="B")
+
+    return pd.DataFrame(
+        {
+            "close_price": closes,
+            "reconstruction_score": scores,
+            "is_outlier": [score > THRESHOLD for score in scores],
+        },
+        index=dates,
     )
 
 
@@ -46,25 +71,39 @@ def _valid_item(**overrides) -> dict:
 
 def test_no_rule_gives_an_empty_list() -> None:
     """Check that without a signal rule no item is returned."""
-    metadatas = [_metadata("AAPL", "simple-autoencoder-aapl:local")]
+    tables = [
+        (
+            _metadata("AAPL", "simple-autoencoder-aapl:local"),
+            _prediction_table([10.0, 11.0], [0.1, 0.2]),
+        )
+    ]
 
-    assert not build_signals(metadatas, None, GENERATED_AT)
+    assert not build_signals(tables, None, GENERATED_AT)
 
 
 def test_models_without_a_decision_are_left_out() -> None:
     """Check that only the models with a decision become items."""
 
-    def rule(metadata: AutoencoderModelMetadata) -> SignalDecision | None:
+    def rule(
+        metadata: AutoencoderModelMetadata,
+        _prediction_table: pd.DataFrame,
+    ) -> SignalDecision | None:
         if metadata.ticker == "AAPL":
             return SignalDecision(action="sell", confidence=0.8)
         return None
 
-    metadatas = [
-        _metadata("AAPL", "simple-autoencoder-aapl:local"),
-        _metadata("MSFT", "simple-autoencoder-msft:local"),
+    tables = [
+        (
+            _metadata("AAPL", "simple-autoencoder-aapl:local"),
+            _prediction_table([10.0, 11.0], [0.1, 0.2]),
+        ),
+        (
+            _metadata("MSFT", "simple-autoencoder-msft:local"),
+            _prediction_table([10.0, 11.0], [0.1, 0.2]),
+        ),
     ]
 
-    items = build_signals(metadatas, rule, GENERATED_AT)
+    items = build_signals(tables, rule, GENERATED_AT)
 
     assert [item.symbol for item in items] == ["AAPL"]
     assert items[0].action == "sell"
@@ -73,11 +112,19 @@ def test_models_without_a_decision_are_left_out() -> None:
 def test_build_signals_copies_the_model_and_the_time() -> None:
     """Check the model name and the generation time of each item."""
 
-    def rule(_metadata_value) -> SignalDecision:
+    def rule(
+        _metadata_value: AutoencoderModelMetadata,
+        _prediction_table: pd.DataFrame,
+    ) -> SignalDecision:
         return SignalDecision(action="buy", confidence=0.6, reason="Teste.")
 
     items = build_signals(
-        [_metadata("AAPL", "simple-autoencoder-aapl:local")],
+        [
+            (
+                _metadata("AAPL", "simple-autoencoder-aapl:local"),
+                _prediction_table([10.0, 11.0], [0.1, 0.2]),
+            )
+        ],
         rule,
         GENERATED_AT,
     )
@@ -90,17 +137,104 @@ def test_build_signals_copies_the_model_and_the_time() -> None:
 def test_model_name_longer_than_60_characters_is_not_reported() -> None:
     """Check that a long model name is left empty, not truncated."""
 
-    def rule(_metadata_value) -> SignalDecision:
+    def rule(
+        _metadata_value: AutoencoderModelMetadata,
+        _prediction_table: pd.DataFrame,
+    ) -> SignalDecision:
         return SignalDecision(action="hold", confidence=0.1)
 
     long_name = "simple-autoencoder-" + "x" * 60
     items = build_signals(
-        [_metadata("AAPL", long_name)],
+        [
+            (
+                _metadata("AAPL", long_name),
+                _prediction_table([10.0, 11.0], [0.1, 0.2]),
+            )
+        ],
         rule,
         GENERATED_AT,
     )
 
     assert items[0].model is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(-0.5, 0.0), (0.3, 0.3), (1.7, 1.0)],
+)
+def test_clip_confidence_limits_the_value(
+    value: float,
+    expected: float,
+) -> None:
+    """Check that the confidence stays between 0 and 1."""
+    assert clip_confidence(value) == pytest.approx(expected)
+
+
+def test_default_rule_holds_when_the_last_window_is_normal() -> None:
+    """Check the hold action and its confidence within the threshold."""
+    decision = default_signal_rule(
+        _metadata("MSFT", "simple-autoencoder-msft:local"),
+        _prediction_table([10.0, 10.5], [0.2, 0.25]),
+    )
+
+    assert decision.action == "hold"
+    assert decision.confidence == pytest.approx(0.75)
+    assert decision.reason is None
+
+
+def test_default_rule_buys_after_an_abnormal_drop() -> None:
+    """Check that an outlier with a falling price gives a buy."""
+    decision = default_signal_rule(
+        _metadata("AAPL", "simple-autoencoder-aapl:local"),
+        _prediction_table([10.0, 9.0], [0.5, 1.5]),
+    )
+
+    assert decision.action == "buy"
+    assert decision.confidence == pytest.approx(0.5)
+    assert decision.reason.startswith("Janela de 10 dias")
+
+
+def test_default_rule_sells_after_an_abnormal_rise() -> None:
+    """Check that an outlier with a rising price gives a sell."""
+    decision = default_signal_rule(
+        _metadata("AAPL", "simple-autoencoder-aapl:local"),
+        _prediction_table([10.0, 11.0], [0.5, 1.2]),
+    )
+
+    assert decision.action == "sell"
+    assert decision.confidence == pytest.approx(0.2)
+
+
+def test_default_rule_holds_an_outlier_with_a_flat_price() -> None:
+    """Check that an outlier without a price move gives a hold."""
+    decision = default_signal_rule(
+        _metadata("AAPL", "simple-autoencoder-aapl:local"),
+        _prediction_table([10.0, 10.0], [0.5, 2.0]),
+    )
+
+    assert decision.action == "hold"
+    assert decision.confidence == pytest.approx(1.0)
+    assert decision.reason is not None
+
+
+def test_default_rule_needs_two_windows() -> None:
+    """Check that a single window gives no signal."""
+    decision = default_signal_rule(
+        _metadata("AAPL", "simple-autoencoder-aapl:local"),
+        _prediction_table([10.0], [0.5]),
+    )
+
+    assert decision is None
+
+
+def test_default_rule_needs_a_positive_threshold() -> None:
+    """Check that a threshold of zero gives no signal."""
+    decision = default_signal_rule(
+        _metadata("AAPL", "simple-autoencoder-aapl:local", 0.0),
+        _prediction_table([10.0, 11.0], [0.5, 1.2]),
+    )
+
+    assert decision is None
 
 
 def test_valid_item_is_accepted() -> None:

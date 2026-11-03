@@ -610,22 +610,82 @@ def predict_from_market_data(
 @app.get(
     "/signals",
     tags=["Signals"],
-    summary="List the buy, sell or hold suggestions of the loaded assets",
+    summary="List the buy, sell or hold suggestion of one asset",
     description=(
-        "One item for each loaded asset that has a signal. The list is empty "
-        "when no signal rule is set or when no asset has a signal. Each item "
-        "has the symbol, the action, a confidence between 0 and 1, the "
-        "UTC generation time, and optionally the model name and a plain "
+        "One item for the asset of the ticker, when its model has a signal "
+        "for the period. The list is empty when no signal rule is set, when "
+        "the period has too few prices, or when the signal cannot be built. "
+        "Each item has the symbol, the action, a confidence between 0 and 1, "
+        "the UTC generation time, and optionally the model name and a plain "
         "reason based only on the model numbers. This is not investment "
         "advice."
     ),
     response_model=list[SignalItem],
+    responses={
+        404: {"model": ErrorResponse},
+        400: {"model": ErrorResponse},
+    },
 )
-def get_signals(service: ModelServiceDependency) -> list[SignalItem]:
-    """Return the signals of the models in memory, or an empty list."""
+def get_signals(
+    service: ModelServiceDependency,
+    ticker: Annotated[
+        str,
+        Query(
+            description="Ticker of the model to use.",
+            examples=["PETR4.SA"],
+        ),
+    ],
+    start_date: Annotated[
+        date | None,
+        Query(
+            description=(
+                "First date of the period. Defaults to 365 days before "
+                "end_date."
+            ),
+            examples=["2026-01-01"],
+        ),
+    ] = None,
+    end_date: Annotated[
+        date | None,
+        Query(
+            description="Last date of the period. Defaults to today.",
+            examples=["2026-09-30"],
+        ),
+    ] = None,
+) -> list[SignalItem]:
+    """Return the signal of one asset for a period, or an empty list.
+
+    The prices of the period are downloaded and scored with the model of
+    the ticker, as in the market data prediction route.
+    """
+    predictor = service.get_predictor(ticker)
+    rule = signal_rules.default_signal_rule
+    if rule is None:
+        return []
+
+    effective_end_date = end_date or date.today()
+    effective_start_date = start_date or (
+        effective_end_date - timedelta(days=DEFAULT_LOOKBACK_DAYS)
+    )
+    if effective_start_date >= effective_end_date:
+        raise ValueError("start_date must be earlier than end_date.")
+
+    try:
+        prediction_table = predict_period(
+            predictor,
+            effective_start_date.isoformat(),
+            effective_end_date.isoformat(),
+        )
+    except ValueError:
+        logger.info(
+            "Skipping the signal of %s: not enough data.",
+            predictor.metadata.ticker,
+        )
+        return []
+
     return build_signals(
-        service.list_loaded_models(),
-        signal_rules.DEFAULT_SIGNAL_RULE,
+        [(predictor.metadata, prediction_table)],
+        rule,
         datetime.now(UTC),
     )
 
