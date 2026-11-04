@@ -44,6 +44,32 @@ the two convolutions. Every convolution uses kernel 3, stride 2 and
 padding 1. The latent vector is non-negative, and the last layer has no
 activation, so reconstructed returns may be negative.
 
+### Regularization
+
+A convolutional encoder fits a training window much more tightly than a
+dense one, so without a brake it reaches a far lower training error than
+validation error. Two settings of `OptimizationConfig` prevent that:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `weight_decay` | `1e-3` | L2 penalty of Adam, which keeps the filters small. |
+| `early_stopping_patience` | `20` | Stops after 20 epochs without a better validation error, and restores the weights of the best epoch. |
+
+`number_of_epochs` (and the `--epochs` argument) is therefore an upper
+bound, not the number of epochs that run. On the tickers measured below
+training stops around epoch 60 to 80 out of 300. The epoch whose weights
+were restored is logged to wandb as `best_epoch`, next to
+`stopped_at_epoch`. Set `early_stopping_patience` to `None` to train
+every epoch and keep the last weights.
+
+Measured effect on real data (`2020-01-01` to `2026-09-15`, window 10,
+300 epochs, learning rate 0.001):
+
+| Ticker | Ratio without regularization | Ratio with it | Test error vs naive baseline |
+|---|---|---|---|
+| AMD | 1.156 | 0.997 | 1.116 < 1.811 |
+| INTC | 3.365 | 1.844 | 2.125 < 3.098 |
+
 ## How to train it
 
 With the shared command, which trains several tickers and writes one
@@ -85,6 +111,23 @@ trained weights are registered as an artifact named
 
 ## Known limits
 
+- **A ticker whose volatility jumps cannot pass the `evaluate` job, with
+  any model.** The windows are normalized with the mean and the standard
+  deviation of the training split, so when the validation period is more
+  volatile than the training period, the validation error rises by the
+  ratio of the variances even for a model that generalizes perfectly.
+  The lowest `overfitting_ratio` a ticker can reach is therefore the
+  ratio between the naive-baseline error of its validation split and
+  that of its training split. For `INTC` over
+  `2020-01-01` to `2026-09-15` that floor is **1.681**, above the 1.5
+  limit of spec 04, because its validation window covers the 2024
+  collapse: the validation returns are 1.28 times, and the test returns
+  1.76 times, the training standard deviation. `AMD` over the same range
+  has a floor of 0.933 and passes. Driving the ratio below the floor is
+  only possible by making the model learn nothing, which then fails the
+  baseline criterion. The useful check for this model is the one it
+  passes on both tickers: the test error is far below the naive
+  baseline.
 - **The serving API does not load this model.** The registries in
   `serving/` rebuild a `SimpleAutoencoder` and only look at artifacts
   whose name starts with `simple-autoencoder-`, so a model of this

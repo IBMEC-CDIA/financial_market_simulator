@@ -264,14 +264,15 @@ def test_train_logs_metrics_for_every_epoch_and_validation(
     epoch_metrics = [
         metrics for metrics in logged_metrics if "epoch" in metrics
     ]
-    validation_metrics = [
-        metrics
-        for metrics in logged_metrics
-        if "validation/loss_mse" in metrics
+    summary_metrics = [
+        metrics for metrics in logged_metrics if "epoch" not in metrics
     ]
     assert [metrics["epoch"] for metrics in epoch_metrics] == [1, 2, 3]
     assert all("train/loss_mse" in metrics for metrics in epoch_metrics)
-    assert len(validation_metrics) == 1
+    assert all(
+        "validation/loss_mse" in metrics for metrics in epoch_metrics
+    )
+    assert len(summary_metrics) == 1
 
 
 @patch(FETCH_PRICE_SERIES_PATH)
@@ -325,6 +326,8 @@ def test_log_model_metadata_contains_training_summary(
         "anomaly_threshold",
         "return_train_mean",
         "return_train_std",
+        "best_epoch",
+        "stopped_at_epoch",
     }
 
 
@@ -378,6 +381,113 @@ def test_train_is_reproducible_with_the_same_seed(
         first_result.training_loss_history,
         second_result.training_loss_history,
     )
+
+
+def _make_patience_config(
+    output_directory,
+    number_of_epochs: int,
+    patience: int | None,
+) -> ConvolutionalAutoencoderTrainingConfig:
+    """Build a configuration with the given epoch limit and patience."""
+    return ConvolutionalAutoencoderTrainingConfig(
+        market_data=MarketDataConfig(
+            window_size=5,
+            batch_size=8,
+            train_split_ratio=0.8,
+        ),
+        optimization=OptimizationConfig(
+            number_of_epochs=number_of_epochs,
+            early_stopping_patience=patience,
+        ),
+        tracking=TrackingConfig(output_directory=str(output_directory)),
+        device="cpu",
+    )
+
+
+def _logged_validation_losses(experiment_tracker) -> list[float]:
+    """Collect the per-epoch validation losses sent to the tracker."""
+    return [
+        call.args[0]["validation/loss_mse"]
+        for call in experiment_tracker.log_metrics.call_args_list
+        if "epoch" in call.args[0]
+    ]
+
+
+@patch(FETCH_PRICE_SERIES_PATH)
+def test_early_stopping_ends_training_before_the_epoch_limit(
+    mock_fetch_price_series, tmp_path
+) -> None:
+    """Check that a small patience stops well before the last epoch."""
+    mock_fetch_price_series.return_value = _make_price_frame(101)
+    experiment_tracker = MagicMock()
+    trainer = ConvolutionalAutoencoderTrainer(
+        ticker="PETR4.SA",
+        config=_make_patience_config(tmp_path, 200, 2),
+        experiment_tracker=experiment_tracker,
+    )
+
+    result = trainer.train()
+
+    assert len(result.training_loss_history) < 200
+    metadata = experiment_tracker.log_model.call_args.kwargs["metadata"]
+    assert metadata["stopped_at_epoch"] == len(result.training_loss_history)
+    assert metadata["best_epoch"] <= metadata["stopped_at_epoch"]
+
+
+@patch(FETCH_PRICE_SERIES_PATH)
+def test_early_stopping_restores_the_best_validation_weights(
+    mock_fetch_price_series, tmp_path
+) -> None:
+    """Check that the kept weights are the ones of the best epoch."""
+    mock_fetch_price_series.return_value = _make_price_frame(101)
+    experiment_tracker = MagicMock()
+    trainer = ConvolutionalAutoencoderTrainer(
+        ticker="PETR4.SA",
+        config=_make_patience_config(tmp_path, 60, 5),
+        experiment_tracker=experiment_tracker,
+    )
+
+    result = trainer.train()
+
+    validation_losses = _logged_validation_losses(experiment_tracker)
+    assert result.validation_loss == pytest.approx(min(validation_losses))
+
+
+@patch(FETCH_PRICE_SERIES_PATH)
+def test_patience_of_none_runs_every_epoch(
+    mock_fetch_price_series, tmp_path
+) -> None:
+    """Check that early stopping can be switched off."""
+    mock_fetch_price_series.return_value = _make_price_frame(101)
+    trainer = ConvolutionalAutoencoderTrainer(
+        ticker="PETR4.SA",
+        config=_make_patience_config(tmp_path, 7, None),
+        experiment_tracker=MagicMock(),
+    )
+
+    result = trainer.train()
+
+    assert len(result.training_loss_history) == 7
+
+
+@patch(f"{TRAINER_MODULE}.torch.optim.Adam")
+@patch(FETCH_PRICE_SERIES_PATH)
+def test_weight_decay_reaches_the_optimizer(
+    mock_fetch_price_series, mock_adam, tmp_path
+) -> None:
+    """Check that the configured L2 penalty is given to Adam."""
+    mock_fetch_price_series.return_value = _make_price_frame(101)
+    config = _make_patience_config(tmp_path, 1, None)
+    config.optimization.weight_decay = 0.25
+    trainer = ConvolutionalAutoencoderTrainer(
+        ticker="PETR4.SA",
+        config=config,
+        experiment_tracker=MagicMock(),
+    )
+
+    trainer.train()
+
+    assert mock_adam.call_args.kwargs["weight_decay"] == 0.25
 
 
 @patch(FETCH_PRICE_SERIES_PATH)

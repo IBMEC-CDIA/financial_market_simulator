@@ -23,6 +23,8 @@ EXPECTED_FLAT_KEYS = {
     "number_of_epochs",
     "learning_rate",
     "random_seed",
+    "weight_decay",
+    "early_stopping_patience",
     "project_name",
     "output_directory",
     "env_file_path",
@@ -60,8 +62,16 @@ def test_default_sub_configurations_are_not_shared() -> None:
     assert first_config.market_data is not second_config.market_data
 
 
+def test_default_regularization_is_enabled() -> None:
+    """Check the weight decay and the patience that limit overfitting."""
+    optimization = ConvolutionalAutoencoderTrainingConfig().optimization
+
+    assert optimization.weight_decay == pytest.approx(1e-3)
+    assert optimization.early_stopping_patience == 20
+
+
 def test_to_flat_dict_contains_exactly_the_expected_keys() -> None:
-    """Check that the flat dictionary has the 15 documented keys."""
+    """Check that the flat dictionary has the 17 documented keys."""
     flat_dictionary = (
         ConvolutionalAutoencoderTrainingConfig().to_flat_dict()
     )
@@ -132,6 +142,43 @@ def test_zero_latent_layer_size_raises_value_error() -> None:
                 latent_layer_size=0,
             ),
         )
+
+
+def test_negative_weight_decay_raises_value_error() -> None:
+    """Check that a negative L2 penalty is rejected by name."""
+    with pytest.raises(ValueError, match="weight_decay"):
+        ConvolutionalAutoencoderTrainingConfig(
+            optimization=OptimizationConfig(weight_decay=-0.1),
+        )
+
+
+def test_zero_weight_decay_is_accepted() -> None:
+    """Check that the L2 penalty can be switched off."""
+    training_config = ConvolutionalAutoencoderTrainingConfig(
+        optimization=OptimizationConfig(weight_decay=0.0),
+    )
+
+    assert training_config.optimization.weight_decay == 0.0
+
+
+@pytest.mark.parametrize("patience", [0, -5])
+def test_non_positive_patience_raises_value_error(patience: int) -> None:
+    """Check that the patience must be positive when it is given."""
+    with pytest.raises(ValueError, match="early_stopping_patience"):
+        ConvolutionalAutoencoderTrainingConfig(
+            optimization=OptimizationConfig(
+                early_stopping_patience=patience,
+            ),
+        )
+
+
+def test_patience_of_none_disables_early_stopping() -> None:
+    """Check that None is accepted to train every epoch."""
+    training_config = ConvolutionalAutoencoderTrainingConfig(
+        optimization=OptimizationConfig(early_stopping_patience=None),
+    )
+
+    assert training_config.optimization.early_stopping_patience is None
 
 
 def test_negative_learning_rate_raises_value_error() -> None:

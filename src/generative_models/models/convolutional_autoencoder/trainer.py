@@ -2,6 +2,7 @@
 
 # pylint: disable=duplicate-code
 
+import copy
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +61,31 @@ class PreparedConvolutionalData:
     return_train_mean: float
     return_train_std: float
     test_dataset: SlidingWindowReconstructionDataset | None = None
+
+
+@dataclass
+class FitOutcome:
+    """Result of the optimization loop of one training run.
+
+    Parameters
+    ----------
+    training_loss_history : list[float]
+        Mean training loss of each epoch that ran, in order. It is
+        shorter than `number_of_epochs` when early stopping ended the
+        training.
+    validation_loss_history : list[float]
+        Validation error measured at the end of each epoch, in order.
+    best_epoch : int
+        Epoch, counted from 1, whose weights were restored. It is the
+        epoch with the smallest validation error.
+    stopped_at_epoch : int
+        Last epoch that ran, counted from 1.
+    """
+
+    training_loss_history: list[float]
+    validation_loss_history: list[float]
+    best_epoch: int
+    stopped_at_epoch: int
 
 
 @dataclass
@@ -544,10 +570,12 @@ class ConvolutionalAutoencoderTrainer:
 
         self.experiment_tracker.start_run()
         try:
-            training_loss_history = self._fit(
+            fit_outcome = self._fit(
                 model,
                 prepared_data.train_dataset,
+                prepared_data.validation_dataset,
             )
+            training_loss_history = fit_outcome.training_loss_history
             train_evaluation_loss = self._evaluate(
                 model,
                 prepared_data.train_dataset,
@@ -586,6 +614,8 @@ class ConvolutionalAutoencoderTrainer:
                     "anomaly_threshold": anomaly_threshold,
                     "return_train_mean": prepared_data.return_train_mean,
                     "return_train_std": prepared_data.return_train_std,
+                    "best_epoch": fit_outcome.best_epoch,
+                    "stopped_at_epoch": fit_outcome.stopped_at_epoch,
                 },
             )
         finally:
@@ -679,34 +709,83 @@ class ConvolutionalAutoencoderTrainer:
             env_file_path=self.config.tracking.env_file_path,
         )
 
-    def _fit(
+    def _run_training_epoch(
         self,
         model: nn.Module,
-        train_dataset: SlidingWindowReconstructionDataset,
-    ) -> list[float]:
-        """Train the model for the configured number of epochs.
-
-        Each epoch logs its mean training loss, weighted by the size of
-        every batch, to the experiment tracker.
+        data_loader: DataLoader,
+        optimizer: torch.optim.Optimizer,
+        window_count: int,
+    ) -> float:
+        """Run one pass over the training windows.
 
         Parameters
         ----------
         model : nn.Module
             Autoencoder to train. It is updated in place.
-        train_dataset : SlidingWindowReconstructionDataset
-            Windows used for training.
+        data_loader : DataLoader
+            Loader of the shuffled training batches.
+        optimizer : torch.optim.Optimizer
+            Optimizer that updates the weights.
+        window_count : int
+            Number of training windows, used to average the loss.
 
         Returns
         -------
-        list[float]
-            Mean training loss of each epoch, in order.
+        float
+            Mean training loss of the epoch, weighted by batch size.
+        """
+        loss_function = nn.MSELoss()
+        model.train()
+        epoch_loss_sum = 0.0
+        for batch_tensor in data_loader:
+            batch_tensor = batch_tensor.to(self.device)
+            optimizer.zero_grad()
+            reconstructed_tensor = model(batch_tensor)
+            batch_loss = loss_function(reconstructed_tensor, batch_tensor)
+            batch_loss.backward()
+            optimizer.step()
+            epoch_loss_sum += batch_loss.item() * len(batch_tensor)
+
+        return epoch_loss_sum / window_count
+
+    # pylint: disable-next=too-many-locals
+    def _fit(
+        self,
+        model: nn.Module,
+        train_dataset: SlidingWindowReconstructionDataset,
+        validation_dataset: SlidingWindowReconstructionDataset,
+    ) -> FitOutcome:
+        """Train the model, stopping when validation stops improving.
+
+        Each epoch logs its mean training loss and its validation error
+        to the experiment tracker. The validation error decides when to
+        stop: after `early_stopping_patience` epochs without an
+        improvement, the loop ends and the weights of the best epoch are
+        restored, so the returned model is the one that generalized
+        best instead of the one that fit the training windows most.
+
+        Parameters
+        ----------
+        model : nn.Module
+            Autoencoder to train. It is updated in place, and ends with
+            the weights of the best epoch.
+        train_dataset : SlidingWindowReconstructionDataset
+            Windows used for training.
+        validation_dataset : SlidingWindowReconstructionDataset
+            Windows used to measure generalization after each epoch.
+
+        Returns
+        -------
+        FitOutcome
+            Loss histories, the epoch whose weights were restored and
+            the last epoch that ran.
         """
         optimization_config = self.config.optimization
         optimizer = torch.optim.Adam(
             model.parameters(),
             lr=optimization_config.learning_rate,
+            weight_decay=optimization_config.weight_decay,
         )
-        loss_function = nn.MSELoss()
         shuffle_generator = torch.Generator().manual_seed(
             optimization_config.random_seed
         )
@@ -716,30 +795,55 @@ class ConvolutionalAutoencoderTrainer:
             shuffle=True,
             generator=shuffle_generator,
         )
+        patience = optimization_config.early_stopping_patience
 
         training_loss_history = []
+        validation_loss_history = []
+        best_validation_loss = float("inf")
+        best_state_dict = copy.deepcopy(model.state_dict())
+        best_epoch = 1
+        epochs_without_improvement = 0
         for epoch_index in range(optimization_config.number_of_epochs):
-            model.train()
-            epoch_loss_sum = 0.0
-            for batch_tensor in data_loader:
-                batch_tensor = batch_tensor.to(self.device)
-                optimizer.zero_grad()
-                reconstructed_tensor = model(batch_tensor)
-                batch_loss = loss_function(reconstructed_tensor, batch_tensor)
-                batch_loss.backward()
-                optimizer.step()
-                epoch_loss_sum += batch_loss.item() * len(batch_tensor)
-
-            epoch_loss = epoch_loss_sum / len(train_dataset)
+            epoch_loss = self._run_training_epoch(
+                model,
+                data_loader,
+                optimizer,
+                len(train_dataset),
+            )
+            validation_loss = self._evaluate(model, validation_dataset)
             training_loss_history.append(epoch_loss)
+            validation_loss_history.append(validation_loss)
             self.experiment_tracker.log_metrics(
                 {
                     "epoch": epoch_index + 1,
                     "train/loss_mse": epoch_loss,
+                    "validation/loss_mse": validation_loss,
                 }
             )
 
-        return training_loss_history
+            if validation_loss < best_validation_loss:
+                best_validation_loss = validation_loss
+                best_state_dict = copy.deepcopy(model.state_dict())
+                best_epoch = epoch_index + 1
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+
+            if (
+                patience is not None
+                and epochs_without_improvement >= patience
+            ):
+                break
+
+        if patience is not None:
+            model.load_state_dict(best_state_dict)
+
+        return FitOutcome(
+            training_loss_history=training_loss_history,
+            validation_loss_history=validation_loss_history,
+            best_epoch=best_epoch,
+            stopped_at_epoch=len(training_loss_history),
+        )
 
     def _evaluate(
         self,

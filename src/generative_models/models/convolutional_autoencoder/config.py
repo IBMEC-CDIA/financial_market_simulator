@@ -62,17 +62,29 @@ class OptimizationConfig:
     Parameters
     ----------
     number_of_epochs : int
-        Number of passes over the training windows.
+        Largest number of passes over the training windows. Early
+        stopping may end the training before this number is reached.
     learning_rate : float
         Step size used by the Adam optimizer.
     random_seed : int
         Seed used to make the weight initialization and the shuffling
         of the training batches reproducible.
+    weight_decay : float
+        L2 penalty of the Adam optimizer. It keeps the convolution
+        filters small, which reduces the gap between the training and
+        the validation errors. Zero disables the penalty.
+    early_stopping_patience : int | None
+        Number of epochs without an improvement of the validation
+        error after which the training stops. The weights of the best
+        epoch are restored. `None` trains for `number_of_epochs` and
+        keeps the weights of the last epoch.
     """
 
     number_of_epochs: int = 300
     learning_rate: float = 1e-3
     random_seed: int = 42
+    weight_decay: float = 1e-3
+    early_stopping_patience: int | None = 20
 
 
 @dataclass
@@ -169,6 +181,15 @@ class ConvolutionalAutoencoderTrainingConfig:
             if field_value <= 0:
                 raise ValueError(f"{field_name} must be positive.")
 
+        if self.optimization.weight_decay < 0:
+            raise ValueError("weight_decay must not be negative.")
+
+        patience = self.optimization.early_stopping_patience
+        if patience is not None and patience <= 0:
+            raise ValueError(
+                "early_stopping_patience must be positive or None."
+            )
+
     def to_flat_dict(self) -> dict[str, object]:
         """Flatten all settings into a single dictionary.
 
@@ -192,6 +213,10 @@ class ConvolutionalAutoencoderTrainingConfig:
             "number_of_epochs": self.optimization.number_of_epochs,
             "learning_rate": self.optimization.learning_rate,
             "random_seed": self.optimization.random_seed,
+            "weight_decay": self.optimization.weight_decay,
+            "early_stopping_patience": (
+                self.optimization.early_stopping_patience
+            ),
             "project_name": self.tracking.project_name,
             "output_directory": self.tracking.output_directory,
             "env_file_path": self.tracking.env_file_path,
