@@ -344,7 +344,7 @@ tracking and the training still completes.
 The image is built by its own job, `build-image`, which starts after
 `train` succeeds. It saves the image as a workflow artifact, and the
 `push-image` job loads it, logs in to Docker Hub and pushes it with the
-`latest` tag and the commit SHA tag. Both jobs run on every branch, and
+tickers tag, the commit SHA tag and the `latest` tag. Both jobs run on every branch, and
 training failures stop them. The workflow needs these repository secrets:
 
 - `DOCKERHUB_USERNAME`: the Docker Hub account name. The image is
@@ -430,7 +430,13 @@ ticker without a registered model fails the job before the build starts. The
 report written this way has `test_loss` and `baseline_test_loss` set to `null`,
 because the wandb artifact does not store them. It fails on fixable
 `CRITICAL` or `HIGH` vulnerabilities. Then the `push-image` job logs in to
-Docker Hub and pushes the image with the commit SHA and the `latest` tags.
+Docker Hub and pushes the image with three tags: the tickers tag, the commit
+SHA and `latest`.
+
+The image name is built from the models that the API reads. The build reads the
+ticker of every `*-overfitting.json` in `models/`, lowercases them, sorts them
+and joins them with `-`. For models of `AAPL` and `MSFT` the image is
+`financial-market-simulator:aapl-msft`. The tag is limited to 120 characters.
 
 The Docker Hub account and token are taken from the `dockerhub_username` and
 `dockerhub_token` inputs of the dispatch. Leave them empty to use the
@@ -439,6 +445,47 @@ The Docker Hub account and token are taken from the `dockerhub_username` and
 
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.
+
+### Deploy workflow (`deploy.yml`)
+
+The deploy workflow is started by hand, with Run workflow. It replaces an Azure
+container instance so that it runs an image from Docker Hub. The inputs are:
+
+- `image`: the image to deploy, for example
+  `myuser/financial-market-simulator:aapl-msft`, as the Build workflow pushes it.
+- `resource_group`: the Azure resource group of the container instance.
+- `container_name`: the container instance. An existing instance with this name
+  is deleted and created again, because the ports of an instance cannot be
+  changed in place.
+- `dns_name_label`: the DNS label of the public address.
+- `location`: the Azure region, `brazilsouth` by default.
+- `dockerhub_username` and `dockerhub_token`: only when the image is private.
+  Leave them empty to use the secrets.
+
+The job runs in the `production` environment and stays running until the
+deploy finishes. It waits up to 20 minutes for the instance to be `Running`,
+then up to 20 minutes for `/health` to answer and `/models/loaded` to list at
+least one model. The deploy has no rollback: if the creation fails after the old
+instance was deleted, the service stays down until the workflow runs again.
+
+Secrets used by the workflow:
+
+| Secret | Required | What it is |
+|---|---|---|
+| `AZURE_CREDENTIALS` | yes | JSON of an Azure service principal, used by `azure/login`. |
+| `DOCKERHUB_USERNAME` | only for a private image | Docker Hub account name. |
+| `DOCKERHUB_TOKEN` | only for a private image | Docker Hub access token. |
+
+The service principal needs the `Contributor` role on the resource group. Create
+it with:
+
+```bash
+az ad sp create-for-rbac   --name financial-market-simulator-deploy   --role Contributor   --scopes /subscriptions/<subscription-id>/resourceGroups/<resource-group>   --json-auth
+```
+
+Save the JSON printed by the command as the `AZURE_CREDENTIALS` secret. The
+`production` environment can also require a reviewer before each deploy, in the
+repository settings.
 
 ### Signals endpoint (`GET /signals`)
 

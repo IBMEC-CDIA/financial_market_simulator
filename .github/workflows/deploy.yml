@@ -1,0 +1,197 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Docker Hub image to deploy, in the form <user>/financial-market-simulator:<tickers>, for example myuser/financial-market-simulator:aapl-msft. The Build workflow pushes it."
+        required: true
+        type: string
+      resource_group:
+        description: "Azure resource group of the container instance."
+        required: true
+        type: string
+      container_name:
+        description: "Name of the Azure container instance. An existing instance with this name is replaced."
+        required: true
+        type: string
+      dns_name_label:
+        description: "DNS name label of the public address, for example autoencoder-002."
+        required: true
+        type: string
+      location:
+        description: "Azure region of the container instance."
+        required: false
+        default: "brazilsouth"
+        type: string
+      dockerhub_username:
+        description: "Docker Hub account name, only needed when the image is private. Leave empty to use the DOCKERHUB_USERNAME secret."
+        required: false
+        default: ""
+        type: string
+      dockerhub_token:
+        description: "Docker Hub access token, only needed when the image is private. Leave empty to use the DOCKERHUB_TOKEN secret. Typed values are not masked by GitHub in the form, so prefer the secret."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.container_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate-inputs:
+    name: Check the image name
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      IMAGE: ${{ inputs.image }}
+
+    steps:
+      - name: Require an image of this project
+        run: |
+          pattern='^[a-z0-9]+([._-][a-z0-9]+)*/financial-market-simulator:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          if ! printf '%s' "$IMAGE" | grep -Eq "$pattern"; then
+            echo "The image must be <user>/financial-market-simulator:<tickers>, got: $IMAGE"
+            exit 1
+          fi
+          echo "Image to deploy: $IMAGE"
+
+  deploy:
+    name: Replace the Azure container instance
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    permissions:
+      contents: read
+
+    env:
+      IMAGE: ${{ inputs.image }}
+      RESOURCE_GROUP: ${{ inputs.resource_group }}
+      CONTAINER_NAME: ${{ inputs.container_name }}
+      DNS_NAME_LABEL: ${{ inputs.dns_name_label }}
+      LOCATION: ${{ inputs.location }}
+      DOCKERHUB_USERNAME: ${{ inputs.dockerhub_username || secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ inputs.dockerhub_token || secrets.DOCKERHUB_TOKEN }}
+
+    steps:
+      - name: Hide the Docker Hub token from the logs
+        run: |
+          if [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "::add-mask::$DOCKERHUB_TOKEN"
+          fi
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Replace the existing container instance
+        run: |
+          if az container show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CONTAINER_NAME" > /dev/null 2>&1; then
+            echo "Deleting the existing container instance $CONTAINER_NAME."
+            az container delete \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$CONTAINER_NAME" \
+              --yes
+          fi
+
+          registry_arguments=()
+          if [ -n "$DOCKERHUB_TOKEN" ]; then
+            registry_arguments=(
+              --registry-login-server docker.io
+              --registry-username "$DOCKERHUB_USERNAME"
+              --registry-password "$DOCKERHUB_TOKEN"
+            )
+          fi
+
+          az container create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CONTAINER_NAME" \
+            --location "$LOCATION" \
+            --image "$IMAGE" \
+            --os-type Linux \
+            --cpu 1 \
+            --memory 2 \
+            --ports 8000 \
+            --ip-address Public \
+            --dns-name-label "$DNS_NAME_LABEL" \
+            "${registry_arguments[@]}"
+
+      - name: Wait until the container instance is running
+        run: |
+          for attempt in $(seq 1 120); do
+            state=$(az container show \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$CONTAINER_NAME" \
+              --query "{provisioning: provisioningState, state: instanceView.state}" \
+              --output json)
+            provisioning=$(printf '%s' "$state" | jq -r '.provisioning')
+            running=$(printf '%s' "$state" | jq -r '.state')
+            echo "Attempt $attempt of 120: provisioning=$provisioning state=$running"
+            if [ "$provisioning" = "Failed" ]; then
+              echo "The container instance failed to provision."
+              exit 1
+            fi
+            if [ "$provisioning" = "Succeeded" ] && [ "$running" = "Running" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "The container instance was not running after 20 minutes."
+          exit 1
+
+      - name: Wait until the API answers and has a model loaded
+        run: |
+          fqdn=$(az container show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CONTAINER_NAME" \
+            --query ipAddress.fqdn \
+            --output tsv)
+          echo "Checking http://$fqdn:8000/health"
+          for attempt in $(seq 1 240); do
+            if curl -fsS --max-time 5 "http://$fqdn:8000/health" > /dev/null 2>&1; then
+              loaded=$(curl -fsS --max-time 30 "http://$fqdn:8000/models/loaded" || echo "[]")
+              if [ "$(printf '%s' "$loaded" | jq 'length')" -ge 1 ]; then
+                echo "$loaded"
+                echo "Deployed $IMAGE at http://$fqdn:8000"
+                exit 0
+              fi
+            fi
+            echo "Attempt $attempt of 240: the API is not ready yet."
+            sleep 5
+          done
+          echo "The API did not answer with a loaded model after 20 minutes."
+          exit 1
+
+  pipeline-success:
+    name: Deploy Run Successfully
+    if: always()
+    needs:
+      - validate-inputs
+      - deploy
+    runs-on: ubuntu-latest
+
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
+
+    steps:
+      - name: Check that every job succeeded
+        run: |
+          FAILED_JOBS=$(printf '%s' "$NEEDS_JSON" | jq -r '
+            to_entries[]
+            | select(.value.result != "success")
+            | "\(.key): \(.value.result)"')
+          if [ -n "$FAILED_JOBS" ]; then
+            echo "Jobs that did not succeed:"
+            echo "$FAILED_JOBS"
+            exit 1
+          fi
+          echo "All jobs succeeded."

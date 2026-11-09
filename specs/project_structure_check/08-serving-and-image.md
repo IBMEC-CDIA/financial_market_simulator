@@ -67,8 +67,10 @@ ignorado.
    correção.
 
 6. O job `push-image` baixa a imagem do job `build-image`, faz login no
-   Docker Hub e envia as tags `<usuario>/financial-market-simulator:<sha>` e
-   `:latest`. O usuário e o token vêm dos inputs `dockerhub_username` e
+   Docker Hub e envia as tags `<usuario>/financial-market-simulator:<tickers>`,
+   `:<sha>` e `:latest`. A tag `<tickers>` é formada pelos tickers dos
+   relatórios `*-overfitting.json` de `models/`, em minúsculas, ordenados e
+   unidos por `-`, por exemplo `aapl-msft`. A tag tem no máximo 120 caracteres. O usuário e o token vêm dos inputs `dockerhub_username` e
    `dockerhub_token`, e na falta deles, dos secrets `DOCKERHUB_USERNAME` e
    `DOCKERHUB_TOKEN`. O job falha se algum dos dois estiver ausente.
 
@@ -104,3 +106,26 @@ ignorado.
 - Os artifacts do GitHub expiram conforme a retenção do repositório. Um
   build com um `train_run_id` antigo pode falhar.
 - Trocar os modelos exige um novo build da imagem.
+
+## Deploy da imagem (`deploy.yml`)
+
+1. O input `image` recebe o nome completo da imagem no Docker Hub, no formato
+   `<usuario>/financial-market-simulator:<tickers>`. O job `validate-inputs`
+   recusa qualquer outro formato.
+2. O job `deploy`, no ambiente `production`, faz login no Azure com o secret
+   `AZURE_CREDENTIALS`. Se já existir um container com o nome `container_name`,
+   ele é apagado. O container é criado na porta `8000`, com IP público, o DNS
+   `dns_name_label` e a imagem do Docker Hub. Com usuário e token do Docker Hub,
+   o container faz login para puxar a imagem, o que só é necessário quando ela
+   é privada.
+3. O job espera até 20 minutos o container ficar `Running`. Depois espera até
+   20 minutos `/health` responder e `/models/loaded` listar pelo menos um
+   modelo. O job só termina quando uma das duas condições falha ou ambas passam.
+4. O job `pipeline-success` falha se algum job anterior não tiver sucesso.
+
+Não há rollback. Se a criação falhar depois de apagar o container antigo, o
+serviço fica fora do ar até um novo deploy.
+
+Secrets: `AZURE_CREDENTIALS` (obrigatório), `DOCKERHUB_USERNAME` e
+`DOCKERHUB_TOKEN` (só para imagem privada). A lista completa e o comando de
+criação do service principal estão no README.
