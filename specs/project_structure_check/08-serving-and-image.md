@@ -48,8 +48,9 @@ ignorado.
 2. O job `build-image` preenche a pasta `models/` de uma destas formas:
    - com `train_run_id` informado, baixa o artifact `trained-models` desse
      run do `train.yml`;
-   - sem `train_run_id`, baixa a versão `latest` do artifact
-     `simple-autoencoder-<ticker>` de cada ticker do input `tickers`, pelo
+   - sem `train_run_id`, baixa a versão com o alias do input `experiment`
+     do artifact `simple-autoencoder-<ticker>` de cada ticker do input
+     `tickers`, pelo
      módulo `generative_models.serving.download_latest_models`. Esse modo
      precisa da chave do wandb (secret `WANDB_API_KEY`). O módulo grava `<nome>.pt` e
      `<nome>-overfitting.json`, que o registro local lê. Os campos
@@ -81,8 +82,10 @@ ignorado.
 | Janela de log-retornos menor que a do modelo | `422` |
 | Pasta sem modelos completos | a API sobe com a lista vazia; `/models/loaded` retorna `[]` |
 | Sem `train_run_id` e sem `tickers` | o job `build-image` falha antes do download |
+| Sem `train_run_id` e sem `experiment` | o job `build-image` falha antes do download |
+| `experiment` inválido ou `latest` | o job `build-image` falha antes do download |
 | Sem `train_run_id` e sem chave do wandb | o job `build-image` falha antes do download |
-| Ticker sem artifact `latest` no wandb | o job `build-image` falha antes do build |
+| Ticker sem modelo com o alias do experimento no wandb | o job `build-image` falha antes do build |
 | `train_run_id` de um run sem o artifact `trained-models` | o job `build-image` falha |
 
 ## Critérios de aceite
