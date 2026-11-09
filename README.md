@@ -254,6 +254,35 @@ Run `--help` to see the same options from the terminal:
 uv run python -m generative_models.models.base_autoencoder.run_train_script --help
 ```
 
+## Serving the API
+
+The image serves the trained autoencoders through the FastAPI application
+in `generative_models.serving.api`, on port `8000`. The models are part of
+the image: the build downloads the `trained-models` artifact of a successful
+Train run into `models/`, and the API loads every model of that folder when
+it starts. A prediction is routed to the model of the ticker in the request,
+and an unknown ticker gets a `404`. The container does not need the wandb key.
+
+To run the image locally, put the files of a trained model in `models/`
+(the `*-overfitting.json` report and the `.pt` weights), then:
+
+```bash
+docker build -t financial-market-simulator .
+docker run --rm -p 8000:8000 financial-market-simulator
+```
+
+Then open `http://127.0.0.1:8000/docs` for the interactive API docs, or
+`http://127.0.0.1:8000/health` to check the service. The image sets
+`AUTOENCODER_MODEL_DIR=/app/models`. The container accepts these optional
+variables:
+
+- `AUTOENCODER_MODEL_DIR`: folder with the model files. When it is set, the
+  models are read from this folder and wandb is not used.
+- `AUTOENCODER_WANDB_PROJECT` and `AUTOENCODER_WANDB_ENTITY`: used only when
+  `AUTOENCODER_MODEL_DIR` is not set.
+- `AUTOENCODER_DEVICE`: `cpu` or `cuda`. Defaults to `cuda` when available.
+- `AUTOENCODER_PRELOAD_MODEL`: `false` to skip loading the models at startup.
+
 ## Continuous integration
 
 Four workflows in `.github/workflows/` run the project:
@@ -294,23 +323,20 @@ uv run pytest tests/end_to_end
 
 The training workflow is started by hand from the Actions tab (Run workflow),
 or from the command line with
-`gh workflow run train.yml -f tickers=AAPL,MSFT -f wandb_api_key=...`. Its
-inputs are:
+`gh workflow run train.yml -f tickers=AAPL,MSFT`. The W&B key is not an input:
+the workflow always uses the `WANDB_API_KEY` repository secret. Its inputs are:
 
 - `model`: the model package to train, for example `base_autoencoder`
   (default). The `plan` job checks that the package has `trainer_factory.py`
   and `overfitting.py`, so a placeholder package is refused.
 - `tickers`: comma-separated ticker symbols, for example `AAPL,MSFT,PETR4.SA`.
   The jobs run once per ticker.
-- `wandb_api_key`: the W&B API key. It is required. When it is left empty,
-  the `WANDB_API_KEY` repository secret is used. A typed value is visible in
-  the form and in the run inputs, so prefer the secret.
 - `epochs`, `learning_rate` and `window_size`: training hyperparameters.
 
 It runs these jobs in order:
 
 1. `ci-check` stops the run unless the CI workflow passed for the same commit.
-2. `plan` checks the ticker symbols and the W&B key, and turns the list into
+2. `plan` checks the ticker symbols and the `WANDB_API_KEY` secret, and turns the list into
    the matrix of the next jobs.
 3. `test-end-to-end` runs the end-to-end tests.
 4. `collect-data` downloads and validates the prices of each ticker, then
@@ -338,7 +364,13 @@ ticker without a registered model fails the job before the build starts. The
 report written this way has `test_loss` and `baseline_test_loss` set to `null`,
 because the wandb artifact does not store them. It fails on fixable
 `CRITICAL` or `HIGH` vulnerabilities. Then the `push-image` job logs in to
-Docker Hub and pushes the image with the commit SHA and the `latest` tags.
+Docker Hub and pushes the image with three tags: the tickers tag, the commit
+SHA and `latest`.
+
+The image name is built from the models that the API reads. The build reads the
+ticker of every `*-overfitting.json` in `models/`, lowercases them, sorts them
+and joins them with `-`. For models of `AAPL` and `MSFT` the image is
+`financial-market-simulator:aapl-msft`. The tag is limited to 120 characters.
 
 The Docker Hub account and token are taken from the `dockerhub_username` and
 `dockerhub_token` inputs of the dispatch. Leave them empty to use the
@@ -347,6 +379,53 @@ The Docker Hub account and token are taken from the `dockerhub_username` and
 
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.
+
+### Deploy workflow (`deploy.yml`)
+
+The deploy workflow is started by hand, with Run workflow. It replaces an Azure
+container instance so that it runs an image from Docker Hub. The only input is
+`image`, for example `myuser/financial-market-simulator:aapl-msft`, as the Build
+workflow pushes it.
+
+The container name and the DNS label are derived from the tag. The tag
+`aapl-msft` gives the container `fmsim-aapl-msft`, and a dot becomes a hyphen,
+so `petr4.sa` gives `fmsim-petr4-sa`. The name must be at most 63 characters.
+The DNS label must be unique in the Azure region, so two images with the same
+tag cannot run at the same time under different names.
+
+The configuration comes from repository variables and secrets:
+
+| Name | Kind | Required | What it is |
+|---|---|---|---|
+| `AZURE_RESOURCE_GROUP` | variable | yes | Resource group of the container instance. |
+| `AZURE_LOCATION` | variable | no | Azure region. Defaults to `brazilsouth`. |
+| `DEPLOY_ENVIRONMENT` | variable | no | GitHub environment of the deploy job. Defaults to `production`. |
+| `AZURE_CREDENTIALS` | secret | yes | JSON of an Azure service principal, used by `azure/login`. |
+| `DOCKERHUB_USERNAME` | secret | yes | Docker Hub account name, used by the container to pull the image. |
+| `DOCKERHUB_TOKEN` | secret | yes | Docker Hub access token, used by the container to pull the image. |
+
+Create the variables in Settings, Secrets and variables, Actions, Variables, or
+with the GitHub CLI:
+
+```bash
+gh variable set AZURE_RESOURCE_GROUP --body "<resource-group>" --repo IBMEC-CDIA/financial_market_simulator
+```
+
+The job runs in the environment named by `DEPLOY_ENVIRONMENT` and stays running
+until the deploy finishes. It waits up to 20 minutes for the instance to be
+`Running`, then up to 20 minutes for `/health` to answer and `/models/loaded` to
+list at least one model. The deploy has no rollback: if the creation fails after
+the old instance was deleted, the service stays down until the workflow runs
+again.
+
+The service principal needs the `Contributor` role on the resource group. Create
+it with:
+
+```bash
+az ad sp create-for-rbac   --name financial-market-simulator-deploy   --role Contributor   --scopes /subscriptions/<subscription-id>/resourceGroups/<resource-group>   --json-auth
+```
+
+Save the JSON printed by the command as the `AZURE_CREDENTIALS` secret.
 
 ### Signals endpoint (`GET /signals`)
 
