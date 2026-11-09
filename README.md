@@ -449,32 +449,40 @@ unless every job before it succeeded.
 ### Deploy workflow (`deploy.yml`)
 
 The deploy workflow is started by hand, with Run workflow. It replaces an Azure
-container instance so that it runs an image from Docker Hub. The inputs are:
+container instance so that it runs an image from Docker Hub. The only input is
+`image`, for example `myuser/financial-market-simulator:aapl-msft`, as the Build
+workflow pushes it.
 
-- `image`: the image to deploy, for example
-  `myuser/financial-market-simulator:aapl-msft`, as the Build workflow pushes it.
-- `resource_group`: the Azure resource group of the container instance.
-- `container_name`: the container instance. An existing instance with this name
-  is deleted and created again, because the ports of an instance cannot be
-  changed in place.
-- `dns_name_label`: the DNS label of the public address.
-- `location`: the Azure region, `brazilsouth` by default.
-- `dockerhub_username` and `dockerhub_token`: only when the image is private.
-  Leave them empty to use the secrets.
+The container name and the DNS label are derived from the tag. The tag
+`aapl-msft` gives the container `fmsim-aapl-msft`, and a dot becomes a hyphen,
+so `petr4.sa` gives `fmsim-petr4-sa`. The name must be at most 63 characters.
+The DNS label must be unique in the Azure region, so two images with the same
+tag cannot run at the same time under different names.
 
-The job runs in the `production` environment and stays running until the
-deploy finishes. It waits up to 20 minutes for the instance to be `Running`,
-then up to 20 minutes for `/health` to answer and `/models/loaded` to list at
-least one model. The deploy has no rollback: if the creation fails after the old
-instance was deleted, the service stays down until the workflow runs again.
+The configuration comes from repository variables and secrets:
 
-Secrets used by the workflow:
+| Name | Kind | Required | What it is |
+|---|---|---|---|
+| `AZURE_RESOURCE_GROUP` | variable | yes | Resource group of the container instance. |
+| `AZURE_LOCATION` | variable | no | Azure region. Defaults to `brazilsouth`. |
+| `DEPLOY_ENVIRONMENT` | variable | no | GitHub environment of the deploy job. Defaults to `production`. |
+| `AZURE_CREDENTIALS` | secret | yes | JSON of an Azure service principal, used by `azure/login`. |
+| `DOCKERHUB_USERNAME` | secret | yes | Docker Hub account name, used by the container to pull the image. |
+| `DOCKERHUB_TOKEN` | secret | yes | Docker Hub access token, used by the container to pull the image. |
 
-| Secret | Required | What it is |
-|---|---|---|
-| `AZURE_CREDENTIALS` | yes | JSON of an Azure service principal, used by `azure/login`. |
-| `DOCKERHUB_USERNAME` | only for a private image | Docker Hub account name. |
-| `DOCKERHUB_TOKEN` | only for a private image | Docker Hub access token. |
+Create the variables in Settings, Secrets and variables, Actions, Variables, or
+with the GitHub CLI:
+
+```bash
+gh variable set AZURE_RESOURCE_GROUP --body "<resource-group>" --repo IBMEC-CDIA/financial_market_simulator
+```
+
+The job runs in the environment named by `DEPLOY_ENVIRONMENT` and stays running
+until the deploy finishes. It waits up to 20 minutes for the instance to be
+`Running`, then up to 20 minutes for `/health` to answer and `/models/loaded` to
+list at least one model. The deploy has no rollback: if the creation fails after
+the old instance was deleted, the service stays down until the workflow runs
+again.
 
 The service principal needs the `Contributor` role on the resource group. Create
 it with:
@@ -483,9 +491,7 @@ it with:
 az ad sp create-for-rbac   --name financial-market-simulator-deploy   --role Contributor   --scopes /subscriptions/<subscription-id>/resourceGroups/<resource-group>   --json-auth
 ```
 
-Save the JSON printed by the command as the `AZURE_CREDENTIALS` secret. The
-`production` environment can also require a reviewer before each deploy, in the
-repository settings.
+Save the JSON printed by the command as the `AZURE_CREDENTIALS` secret.
 
 ### Signals endpoint (`GET /signals`)
 

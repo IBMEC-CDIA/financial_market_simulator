@@ -109,23 +109,28 @@ ignorado.
 
 ## Deploy da imagem (`deploy.yml`)
 
-1. O input `image` recebe o nome completo da imagem no Docker Hub, no formato
-   `<usuario>/financial-market-simulator:<tickers>`. O job `validate-inputs`
-   recusa qualquer outro formato.
-2. O job `deploy`, no ambiente `production`, faz login no Azure com o secret
-   `AZURE_CREDENTIALS`. Se já existir um container com o nome `container_name`,
-   ele é apagado. O container é criado na porta `8000`, com IP público, o DNS
-   `dns_name_label` e a imagem do Docker Hub. Com usuário e token do Docker Hub,
-   o container faz login para puxar a imagem, o que só é necessário quando ela
-   é privada.
-3. O job espera até 20 minutos o container ficar `Running`. Depois espera até
+1. O único input é `image`, no formato
+   `<usuario>/financial-market-simulator:<tickers>`, em minúsculas. O job
+   `validate-inputs` recusa qualquer outro formato.
+2. O mesmo job deriva o nome do container e o DNS label de `<tickers>`:
+   `fmsim-<tickers>`, com cada ponto trocado por hífen. O nome precisa ter no
+   máximo 63 caracteres e ser um DNS label válido. Ele é repassado ao job
+   `deploy` pelo output `container_name`.
+3. O job `deploy` roda no environment definido por `DEPLOY_ENVIRONMENT`
+   (padrão `production`). Ele confere a variável `AZURE_RESOURCE_GROUP` e os
+   secrets `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`. Depois faz login no Azure
+   com `AZURE_CREDENTIALS`, apaga o container com o mesmo nome, se existir, e
+   cria outro na porta `8000`, com IP público, o DNS label derivado e a imagem
+   do Docker Hub, com login para o pull.
+4. O job espera até 20 minutos o container ficar `Running`. Depois espera até
    20 minutos `/health` responder e `/models/loaded` listar pelo menos um
    modelo. O job só termina quando uma das duas condições falha ou ambas passam.
-4. O job `pipeline-success` falha se algum job anterior não tiver sucesso.
+5. O job `pipeline-success` falha se algum job anterior não tiver sucesso.
 
 Não há rollback. Se a criação falhar depois de apagar o container antigo, o
 serviço fica fora do ar até um novo deploy.
 
-Secrets: `AZURE_CREDENTIALS` (obrigatório), `DOCKERHUB_USERNAME` e
-`DOCKERHUB_TOKEN` (só para imagem privada). A lista completa e o comando de
-criação do service principal estão no README.
+Configuração: variáveis `AZURE_RESOURCE_GROUP` (obrigatória),
+`AZURE_LOCATION` e `DEPLOY_ENVIRONMENT` (opcionais). Secrets:
+`AZURE_CREDENTIALS`, `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`. A lista completa
+e os comandos estão no README.

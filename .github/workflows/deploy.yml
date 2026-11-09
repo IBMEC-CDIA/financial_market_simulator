@@ -4,49 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       image:
-        description: "Docker Hub image to deploy, in the form <user>/financial-market-simulator:<tickers>, for example myuser/financial-market-simulator:aapl-msft. The Build workflow pushes it."
+        description: "Docker Hub image to deploy, in the form <user>/financial-market-simulator:<tickers>, for example myuser/financial-market-simulator:aapl-msft. The Build workflow pushes it. The container name and the DNS label are derived from the tickers in the tag."
         required: true
-        type: string
-      resource_group:
-        description: "Azure resource group of the container instance."
-        required: true
-        type: string
-      container_name:
-        description: "Name of the Azure container instance. An existing instance with this name is replaced."
-        required: true
-        type: string
-      dns_name_label:
-        description: "DNS name label of the public address, for example autoencoder-002."
-        required: true
-        type: string
-      location:
-        description: "Azure region of the container instance."
-        required: false
-        default: "brazilsouth"
-        type: string
-      dockerhub_username:
-        description: "Docker Hub account name, only needed when the image is private. Leave empty to use the DOCKERHUB_USERNAME secret."
-        required: false
-        default: ""
-        type: string
-      dockerhub_token:
-        description: "Docker Hub access token, only needed when the image is private. Leave empty to use the DOCKERHUB_TOKEN secret. Typed values are not masked by GitHub in the form, so prefer the secret."
-        required: false
-        default: ""
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-${{ inputs.container_name }}
+  group: deploy-${{ inputs.image }}
   cancel-in-progress: false
 
 jobs:
   validate-inputs:
-    name: Check the image name
+    name: Check the image and derive the container name
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
+    outputs:
+      container_name: ${{ steps.derive.outputs.container_name }}
 
     env:
       IMAGE: ${{ inputs.image }}
@@ -54,37 +30,63 @@ jobs:
     steps:
       - name: Require an image of this project
         run: |
-          pattern='^[a-z0-9]+([._-][a-z0-9]+)*/financial-market-simulator:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          pattern='^[a-z0-9]+([._-][a-z0-9]+)*/financial-market-simulator:[a-z0-9][a-z0-9._-]{0,127}$'
           if ! printf '%s' "$IMAGE" | grep -Eq "$pattern"; then
-            echo "The image must be <user>/financial-market-simulator:<tickers>, got: $IMAGE"
+            echo "The image must be <user>/financial-market-simulator:<tickers>, in lower case, got: $IMAGE"
             exit 1
           fi
           echo "Image to deploy: $IMAGE"
+
+      - name: Derive the container name and the DNS label from the tickers
+        id: derive
+        run: |
+          image_tag="${IMAGE##*:}"
+          container_name="fmsim-$(printf '%s' "$image_tag" | tr '.' '-')"
+          if [ "${#container_name}" -gt 63 ]; then
+            echo "The container name would be longer than 63 characters: $container_name"
+            exit 1
+          fi
+          if ! printf '%s' "$container_name" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
+            echo "The container name is not a valid DNS label: $container_name"
+            exit 1
+          fi
+          echo "Container name and DNS label: $container_name"
+          echo "container_name=$container_name" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: Replace the Azure container instance
     needs: validate-inputs
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    environment: production
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'production' }}
     permissions:
       contents: read
 
     env:
       IMAGE: ${{ inputs.image }}
-      RESOURCE_GROUP: ${{ inputs.resource_group }}
-      CONTAINER_NAME: ${{ inputs.container_name }}
-      DNS_NAME_LABEL: ${{ inputs.dns_name_label }}
-      LOCATION: ${{ inputs.location }}
-      DOCKERHUB_USERNAME: ${{ inputs.dockerhub_username || secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ inputs.dockerhub_token || secrets.DOCKERHUB_TOKEN }}
+      CONTAINER_NAME: ${{ needs.validate-inputs.outputs.container_name }}
+      DNS_NAME_LABEL: ${{ needs.validate-inputs.outputs.container_name }}
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      LOCATION: ${{ vars.AZURE_LOCATION || 'brazilsouth' }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
     steps:
+      - name: Check the deploy configuration
+        run: |
+          if [ -z "$RESOURCE_GROUP" ]; then
+            echo "The repository variable AZURE_RESOURCE_GROUP is required."
+            exit 1
+          fi
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "The secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are required to pull the image."
+            exit 1
+          fi
+          echo "Deploying $IMAGE as $CONTAINER_NAME in $RESOURCE_GROUP ($LOCATION)."
+
       - name: Hide the Docker Hub token from the logs
         run: |
-          if [ -n "$DOCKERHUB_TOKEN" ]; then
-            echo "::add-mask::$DOCKERHUB_TOKEN"
-          fi
+          echo "::add-mask::$DOCKERHUB_TOKEN"
 
       - name: Log in to Azure
         uses: azure/login@v2
@@ -103,15 +105,6 @@ jobs:
               --yes
           fi
 
-          registry_arguments=()
-          if [ -n "$DOCKERHUB_TOKEN" ]; then
-            registry_arguments=(
-              --registry-login-server docker.io
-              --registry-username "$DOCKERHUB_USERNAME"
-              --registry-password "$DOCKERHUB_TOKEN"
-            )
-          fi
-
           az container create \
             --resource-group "$RESOURCE_GROUP" \
             --name "$CONTAINER_NAME" \
@@ -123,7 +116,9 @@ jobs:
             --ports 8000 \
             --ip-address Public \
             --dns-name-label "$DNS_NAME_LABEL" \
-            "${registry_arguments[@]}"
+            --registry-login-server docker.io \
+            --registry-username "$DOCKERHUB_USERNAME" \
+            --registry-password "$DOCKERHUB_TOKEN"
 
       - name: Wait until the container instance is running
         run: |
