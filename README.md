@@ -42,40 +42,44 @@ and reproducible workflows over performance.
 ```
 financial_market_simulator/
 ├── README.md
-├── pyproject.toml
-├── requirements.txt
-├── .env.example
+├── pyproject.toml                 # dependencies and tool settings
+├── requirements.txt               # full development environment
+├── uv.lock                        # versions locked by uv
+├── Dockerfile                     # image that serves the FastAPI autoencoder API
+├── .dockerignore
+├── .trivyignore                   # vulnerabilities accepted in the image scan
+├── .env.example                   # template of the variables; copy it to .env
 ├── .gitignore
 ├── CLAUDE.md
 ├── .github/
 │   ├── copilot-instructions.md
-│   └── workflows/
-│       └── autoencoder_pipeline.yml
+│   ├── actions/
+│   │   └── setup-python-uv/       # composite action: Python 3.12 and uv
+│   └── workflows/                 # ci.yml, train.yml, build.yml, deploy.yml
 │
-├── Dockerfile                  # image that serves the FastAPI autoencoder API
-├── .dockerignore
-│
-├── notebooks/                  # exploratory and teaching notebooks
-├── specs/                      # module specs for students
-│   ├── training/               # training pipeline specs
-│   └── serving/                # inference and REST API specs
+├── docs/                          # explanatory documents of the project
+├── models/                        # trained models copied into the image
+├── notebooks/                     # exploratory and teaching notebooks
+├── specs/                         # module specs for students
+│   ├── project_structure_check/   # layout, contracts and quality gates
+│   ├── training/                  # training pipeline specs
+│   └── serving/                   # inference and REST API specs
 │
 ├── src/
 │   └── generative_models/
-│       ├── data/                # datasets and data loading utilities
-│       ├── common/               # shared helpers used across models
-│       ├── tracking/             # experiment tracking (e.g. Weights & Biases)
+│       ├── data/                  # market data, validation, normalization, datasets
 │       ├── models/
-│       │   ├── regression/       # regression baselines
-│       │   ├── autoencoder/      # autoencoder models
-│       │   ├── vae/              # variational autoencoder models
-│       │   └── cvae/             # conditional variational autoencoder models
-│       ├── serving/              # model inference / serving utilities
-│       └── mcp_server/           # exposes trained models through an MCP server
+│       │   ├── base_autoencoder/  # reference model: autoencoder, trainer, overfitting
+│       │   ├── regression/        # feed-forward regression model
+│       │   ├── autoencoder/       # placeholder package
+│       │   ├── convolutional_autoencoder/  # placeholder package
+│       │   ├── gru_autoencoder/   # placeholder package
+│       │   └── lstm_autoencoder/  # placeholder package
+│       ├── registry/              # model registry
+│       ├── serving/               # FastAPI API, model service, predictor, signals
+│       └── tracking/              # experiment tracking (Weights & Biases)
 │
-├── scripts/                     # standalone scripts (training, data prep, etc.)
-├── tests/                       # unit tests, mirroring src/generative_models
-└── docker/                      # container definitions
+└── tests/                         # unit and end-to-end tests, mirroring src/
 ```
 
 ## Tech stack
@@ -250,106 +254,7 @@ Run `--help` to see the same options from the terminal:
 uv run python -m generative_models.models.base_autoencoder.run_train_script --help
 ```
 
-## Continuous integration
-
-The workflow defined in
-[`.github/workflows/autoencoder_pipeline.yml`](.github/workflows/autoencoder_pipeline.yml)
-(named "Autoencoder Pipeline") runs the test suite automatically:
-
-- when a pull request is opened,
-- on every new commit pushed to an open pull request,
-- and when a pull request is merged into `main`.
-
-The pipeline starts with `structure`, which checks the project layout:
-the required files (`pyproject.toml`, `uv.lock`, `README.md`,
-`requirements.txt`, `CLAUDE.md`, `Dockerfile`, `.gitignore`,
-`.dockerignore`, `.trivyignore`), that the `tests` folder exists, that
-`.env` is ignored by git and Docker and never tracked, that the Dockerfile
-installs from `uv.lock`, and that `uv.lock` matches `pyproject.toml`.
-For each model package that has a `trainer_factory.py`, the same job checks
-that `trainer_factory.py`, `overfitting.py` and `__init__.py` exist, that the
-`__init__.py` has a docstring, and that
-`tests/generative_models/models/<name>/__init__.py` exists.
-Placeholder packages are skipped until they have a trainer. Then `lint` runs pylint. Only after `lint` passes do `unit-tests`,
-`end-to-end-tests` and `security` run, in parallel. `test-report` writes a
-summary of the results to the job summary page. The `collect-data` job
-starts only when every check before it passes.
-
-Quality and security checks in the workflow:
-
-- `unit-tests` runs the unit tests. It fails when the coverage
-  of `src/generative_models` is below 90%, and it uploads the JUnit and
-  coverage XML reports as the `unit-test-reports` artifact.
-- `security` audits the runtime dependencies locked in `uv.lock` with
-  `pip-audit` (Windows-only pins are left out, because CI runs on Linux),
-  scans the source code with Bandit at medium severity and above, and scans
-  the git history for committed secrets with Gitleaks.
-- `test-report` ("Test report") runs after the tests and writes the job
-  results, the number of unit tests and the line coverage to the summary.
-- `pipeline-success` ("Pipeline Run Successfully") runs last. It fails when
-  any job did not succeed. On pull requests, the jobs that only run on push
-  are allowed to be skipped.
-- `build-image` scans the image with Trivy and fails on `CRITICAL` or `HIGH`
-  vulnerabilities that have a fix available. The list is written to the
-  job summary, before the image is saved or pushed.
-  Known exceptions are listed in `.trivyignore`, with a justification and
-  an expiry date.
-
-- `evaluate` writes the overfitting table to the job summary page.
-- Changes that only touch Markdown files, `specs/` or `docs/` do not start
-  the pipeline.
-- The shared setup (Python, uv, cache and dependencies) lives in the
-  composite action `.github/actions/setup-python-uv`.
-
-The same workflow has three more jobs, which only run after `collect-data`
-and its dependencies pass
-(`collect-data` and `train` are also started by hand from the Actions tab,
-where the ticker is chosen, default `AAPL`):
-
-1. `collect-data` downloads the daily prices of the ticker with
-   `generative_models.data.collect_market_data`. Before anything is saved,
-   the prices are checked with Great Expectations
-   (`generative_models.data.validation`): enough rows, no missing or
-   non-positive prices, unique and increasing dates, and no daily log-return
-   above 0.5 in absolute value. Invalid data stops the job. Then it saves a
-   CSV file with the `close_price`, `log_return` and `split` columns. The
-   `split` column marks the first 70% of the log-returns as `train`, the next
-   15% as `validation` and the last 15% as `test`, in chronological order.
-   The file is uploaded as the `market-data-<ticker>` artifact.
-2. `train` downloads that artifact and trains the autoencoder with
-   `--price-data-path`, using the `split` column. The validation split is
-   used during training to monitor it. After training, the model is
-   evaluated once on the test split, together with a naive baseline that
-   always predicts zero. The overfitting report (`*-overfitting.json`)
-   contains the training, validation and test errors and the baseline error.
-   It uploads the `.pt` weights and the report as the
-   `autoencoder-model-<ticker>` artifact.
-3. `evaluate` runs after `train`. It reads the report and fails unless both
-   conditions hold: the validation to training error ratio is at most 1.5
-   (no strong overfitting), and the test error is smaller than the baseline
-   error (the model learned something the naive prediction does not).
-
-To run the same steps locally, the end-to-end test simulates the prices,
-so it does not need network access or a wandb key:
-
-```bash
-uv run pytest tests/end_to_end
-```
-
-Training logs the run and the model artifact to wandb, so the workflow
-needs a `WANDB_API_KEY` repository secret (Settings > Secrets and
-variables > Actions). Without the secret, the run falls back to disabled
-tracking and the training still completes.
-
-The image is built by its own job, `build-image`, which starts after
-`train` succeeds. It saves the image as a workflow artifact, and the
-`push-image` job loads it, logs in to Docker Hub and pushes it with the
-tickers tag, the commit SHA tag and the `latest` tag. Both jobs run on every branch, and
-training failures stop them. The workflow needs these repository secrets:
-
-- `DOCKERHUB_USERNAME`: the Docker Hub account name. The image is
-  published as `<DOCKERHUB_USERNAME>/financial-market-simulator`.
-- `DOCKERHUB_TOKEN`: a Docker Hub access token with write permission.
+## Serving the API
 
 The image serves the trained autoencoders through the FastAPI application
 in `generative_models.serving.api`, on port `8000`. The models are part of
@@ -358,12 +263,8 @@ Train run into `models/`, and the API loads every model of that folder when
 it starts. A prediction is routed to the model of the ticker in the request,
 and an unknown ticker gets a `404`. The container does not need the wandb key.
 
-The build workflow (`build.yml`) takes the models from the Train run given in
-its `train_run_id` input. When that input is empty, it downloads the latest
-registered model of each ticker in the `tickers` input from wandb, and needs
-the `WANDB_API_KEY` secret. To run the image
-locally, put the files of a trained model in `models/` (the
-`*-overfitting.json` report and the `.pt` weights), then:
+To run the image locally, put the files of a trained model in `models/`
+(the `*-overfitting.json` report and the `.pt` weights), then:
 
 ```bash
 docker build -t financial-market-simulator .
@@ -381,6 +282,42 @@ variables:
   `AUTOENCODER_MODEL_DIR` is not set.
 - `AUTOENCODER_DEVICE`: `cpu` or `cuda`. Defaults to `cuda` when available.
 - `AUTOENCODER_PRELOAD_MODEL`: `false` to skip loading the models at startup.
+
+## Continuous integration
+
+Four workflows in `.github/workflows/` run the project:
+
+| Workflow | File | How it starts | Purpose |
+|---|---|---|---|
+| CI | `ci.yml` | Every push and pull request, or by hand | Checks the project, runs the tests and the security scans. |
+| Train | `train.yml` | By hand | Trains the models of the given tickers and evaluates them. |
+| Build | `build.yml` | By hand | Builds and tests the Docker image, then pushes it to Docker Hub. |
+| Deploy | `deploy.yml` | By hand | Replaces the Azure container instance with an image from Docker Hub. |
+
+The CI workflow has these jobs:
+
+- `structure` checks the required files, that `.env` is ignored by git and
+  Docker and never tracked, and the layout of the model packages.
+- `lint` runs pylint on `src/generative_models` and `tests`.
+- `unit-test` runs pytest with coverage. It fails when the coverage of
+  `src/generative_models` is below 90%, and uploads the JUnit and coverage
+  reports as the `unit-test-reports` artifact.
+- `security` audits the runtime dependencies locked in `uv.lock` with
+  `pip-audit`, scans the source code with Bandit at medium severity and
+  above, and scans the git history for committed secrets with Gitleaks.
+- `test-report` writes the test results and the coverage to the job summary.
+- `pipeline-success` fails when any job before it did not succeed.
+
+Changes that only touch Markdown files, `specs/` or `docs/` do not start CI.
+The shared setup (Python, uv, cache and dependencies) lives in the composite
+action `.github/actions/setup-python-uv`.
+
+To run the end-to-end tests locally, which simulate the prices and need
+neither network access nor a wandb key:
+
+```bash
+uv run pytest tests/end_to_end
+```
 
 ### Training workflow (`train.yml`)
 
