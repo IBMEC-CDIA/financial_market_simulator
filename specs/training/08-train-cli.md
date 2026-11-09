@@ -68,6 +68,7 @@ script.
 | `--output-directory` | `str` | `tracking.output_directory` |
 | `--env-file-path` | `str` | `tracking.env_file_path` |
 | `--device` | `str` | `device` |
+| `--experiment-name` | `str` | `tracking.experiment_name` (padrão `default`) |
 
 ### `build_training_config`
 

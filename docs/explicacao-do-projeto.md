@@ -116,7 +116,8 @@ Há dois jeitos de carregar os modelos no serviço:
 - **Local:** `local_autoencoder_registry.py` lê a pasta `models/`, indicada
   pela variável `AUTOENCODER_MODEL_DIR`.
 - **wandb:** `wandb_autoencoder_registry.py` e `download_latest_models.py`
-  baixam a versão `latest` de cada modelo registrado no wandb.
+  baixam a versão de cada modelo registrado no wandb sob o alias do
+  experimento (`latest` por padrão).
 
 ### 2.6 Serving (`src/generative_models/serving/`)
 
@@ -275,7 +276,7 @@ na próxima seção.
 |---|---|---|
 | `ci.yml` | Push e pull request | Estrutura do projeto, lint, testes unitários, análise de segurança e relatório. |
 | `train.yml` | Manual | Confere o CI do commit, valida o modelo e os tickers, roda os testes de ponta a ponta, coleta os preços, treina e avalia o overfitting. |
-| `build.yml` | Manual | Baixa os modelos (de um run de treino ou o `latest` do wandb), constrói a imagem, testa a API, escaneia vulnerabilidades com Trivy e envia a imagem ao Docker Hub. |
+| `build.yml` | Manual | Baixa os modelos (de um run de treino ou do experimento informado no wandb), constrói a imagem, testa a API, escaneia vulnerabilidades com Trivy e envia a imagem ao Docker Hub. |
 | `deploy.yml` | Manual | Substitui o container no Azure a partir de uma imagem do Docker Hub, e espera a API responder com um modelo carregado. |
 
 Configuração necessária no GitHub (*Settings > Secrets and variables > Actions*):

@@ -8,6 +8,7 @@ from generative_models.models.base_autoencoder.config import (
     MarketDataConfig,
     OptimizationConfig,
     TrackingConfig,
+    validate_experiment_name,
 )
 
 EXPECTED_FLAT_KEYS = {
@@ -24,6 +25,7 @@ EXPECTED_FLAT_KEYS = {
     "project_name",
     "output_directory",
     "env_file_path",
+    "experiment_name",
     "contamination",
     "device",
 }
@@ -49,7 +51,7 @@ def test_default_sub_configurations_are_not_shared() -> None:
 
 
 def test_to_flat_dict_contains_exactly_the_expected_keys() -> None:
-    """Check that the flat dictionary has the 15 documented keys."""
+    """Check that the flat dictionary has the 16 documented keys."""
     flat_dictionary = AutoencoderTrainingConfig().to_flat_dict()
 
     assert set(flat_dictionary.keys()) == EXPECTED_FLAT_KEYS
@@ -106,3 +108,33 @@ def test_negative_learning_rate_raises_value_error() -> None:
         AutoencoderTrainingConfig(
             optimization=OptimizationConfig(learning_rate=-0.1),
         )
+
+
+def test_default_experiment_name_is_default() -> None:
+    """Check that a tracking configuration starts in the default experiment."""
+    assert TrackingConfig().experiment_name == "default"
+
+
+@pytest.mark.parametrize(
+    "experiment_name",
+    ["aapl-baseline", "v2", "0-smoke", "a" * 40],
+)
+def test_valid_experiment_names_are_accepted(experiment_name: str) -> None:
+    """Check that lowercase names with digits and hyphens are accepted."""
+    assert validate_experiment_name(experiment_name) == experiment_name
+
+
+@pytest.mark.parametrize(
+    "experiment_name",
+    ["", "Baseline", "-start", "has space", "under_score", "a" * 41],
+)
+def test_invalid_experiment_names_are_rejected(experiment_name: str) -> None:
+    """Check that names outside the allowed format are rejected."""
+    with pytest.raises(ValueError, match="experiment_name must start"):
+        validate_experiment_name(experiment_name)
+
+
+def test_latest_is_reserved_for_the_latest_model() -> None:
+    """Check that the experiment name cannot be the alias latest."""
+    with pytest.raises(ValueError, match="cannot be 'latest'"):
+        TrackingConfig(experiment_name="latest")

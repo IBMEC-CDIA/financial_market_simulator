@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class TrainingOptions:
+class TrainingOptions:  # pylint: disable=too-many-instance-attributes
     """Options that every model accepts when it is trained for tickers.
 
     Parameters
@@ -23,6 +23,9 @@ class TrainingOptions:
         Directory where the weights and the reports are saved.
     device : str
         Device for training, for example `"cpu"` or `"cuda"`.
+    experiment_name : str
+        Name of the experiment the models are registered under. See
+        `TrackingConfig.experiment_name` for the allowed format.
 
     Example
     -------
@@ -38,3 +41,4 @@ class TrainingOptions:
     window_size: int = 10
     output_directory: str = "artifacts"
     device: str = "cpu"
+    experiment_name: str = "default"

@@ -331,6 +331,11 @@ the workflow always uses the `WANDB_API_KEY` repository secret. Its inputs are:
   and `overfitting.py`, so a placeholder package is refused.
 - `tickers`: comma-separated ticker symbols, for example `AAPL,MSFT,PETR4.SA`.
   The jobs run once per ticker.
+- `experiment`: the name the models are registered under in wandb, for example
+  `aapl-baseline` (default `default`). The build picks the models of an
+  experiment by this name, so runs with different settings do not get mixed.
+  Use lowercase letters, digits and hyphens, at most 40 characters, not
+  `latest`.
 - `epochs`, `learning_rate` and `window_size`: training hyperparameters.
 
 It runs these jobs in order:
@@ -357,10 +362,12 @@ downloads the trained models, builds the
 Docker image, smoke tests it and scans it with Trivy.
 
 To build without a Train run, leave `train_run_id` empty and fill in `tickers`
-(for example `PETR4.SA,AAPL`). The job then runs
-`generative_models.serving.download_latest_models`, which writes the `latest`
-model of each ticker from wandb into `models/` before the image is built. A
-ticker without a registered model fails the job before the build starts. The
+(for example `PETR4.SA,AAPL`) and `experiment` (for example `aapl-baseline`).
+The job then runs `generative_models.serving.download_latest_models` with
+`--alias <experiment>`, which writes the model of each ticker registered under
+that experiment from wandb into `models/` before the image is built. A ticker
+without a model under that experiment fails the job before the build starts.
+The `latest` alias is not accepted as an experiment. The
 report written this way has `test_loss` and `baseline_test_loss` set to `null`,
 because the wandb artifact does not store them. It fails on fixable
 `CRITICAL` or `HIGH` vulnerabilities. Then the `push-image` job logs in to

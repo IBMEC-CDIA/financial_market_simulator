@@ -1,6 +1,10 @@
 """Typed configuration objects for training the autoencoder."""
 
+import re
 from dataclasses import dataclass, field
+
+EXPERIMENT_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+RESERVED_EXPERIMENT_NAME = "latest"
 
 
 @dataclass
@@ -83,11 +87,70 @@ class TrackingConfig:
         Directory where the trained model weights are saved.
     env_file_path : str
         Path to the `.env` file that contains `WANDB_API_KEY`.
+    experiment_name : str
+        Name of the experiment. The model is registered with this name as
+        an alias, so the build can pick the models of one experiment. It
+        uses lowercase letters, digits and hyphens, at most 40 characters,
+        and cannot be `"latest"`.
+
+    Raises
+    ------
+    ValueError
+        If `experiment_name` is not a valid experiment name.
+
+    Example
+    -------
+    >>> TrackingConfig(experiment_name="aapl-baseline").experiment_name
+    'aapl-baseline'
     """
 
     project_name: str = "autoencoder-simple-outlier-trading-agent"
     output_directory: str = "artifacts"
     env_file_path: str = ".env"
+    experiment_name: str = "default"
+
+    def __post_init__(self) -> None:
+        """Validate the experiment name."""
+        validate_experiment_name(self.experiment_name)
+
+
+def validate_experiment_name(experiment_name: str) -> str:
+    """Check that an experiment name can be used as a model alias.
+
+    Parameters
+    ----------
+    experiment_name : str
+        Experiment name to check.
+
+    Returns
+    -------
+    str
+        The same name, when it is valid.
+
+    Raises
+    ------
+    ValueError
+        If the name is `"latest"`, or does not start with a lowercase
+        letter or digit, use only lowercase letters, digits and hyphens,
+        or has more than 40 characters.
+
+    Example
+    -------
+    >>> validate_experiment_name("aapl-baseline")
+    'aapl-baseline'
+    """
+    if experiment_name == RESERVED_EXPERIMENT_NAME:
+        raise ValueError(
+            f"experiment_name cannot be '{RESERVED_EXPERIMENT_NAME}', "
+            "which is the alias of the latest model."
+        )
+    if EXPERIMENT_NAME_PATTERN.fullmatch(experiment_name) is None:
+        raise ValueError(
+            "experiment_name must start with a lowercase letter or digit, "
+            "use only lowercase letters, digits and hyphens, and have at "
+            f"most 40 characters. Got '{experiment_name}'."
+        )
+    return experiment_name
 
 
 @dataclass
@@ -187,6 +250,7 @@ class AutoencoderTrainingConfig:
             "project_name": self.tracking.project_name,
             "output_directory": self.tracking.output_directory,
             "env_file_path": self.tracking.env_file_path,
+            "experiment_name": self.tracking.experiment_name,
             "contamination": self.contamination,
             "device": self.device,
         }
