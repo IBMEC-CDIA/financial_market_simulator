@@ -361,7 +361,7 @@ and an unknown ticker gets a `404`. The container does not need the wandb key.
 The build workflow (`build.yml`) takes the models from the Train run given in
 its `train_run_id` input. When that input is empty, it downloads the latest
 registered model of each ticker in the `tickers` input from wandb, and needs
-the `wandb_api_key` input or the `WANDB_API_KEY` secret. To run the image
+the `WANDB_API_KEY` secret. To run the image
 locally, put the files of a trained model in `models/` (the
 `*-overfitting.json` report and the `.pt` weights), then:
 
@@ -386,23 +386,20 @@ variables:
 
 The training workflow is started by hand from the Actions tab (Run workflow),
 or from the command line with
-`gh workflow run train.yml -f tickers=AAPL,MSFT -f wandb_api_key=...`. Its
-inputs are:
+`gh workflow run train.yml -f tickers=AAPL,MSFT`. The W&B key is not an input:
+the workflow always uses the `WANDB_API_KEY` repository secret. Its inputs are:
 
 - `model`: the model package to train, for example `base_autoencoder`
   (default). The `plan` job checks that the package has `trainer_factory.py`
   and `overfitting.py`, so a placeholder package is refused.
 - `tickers`: comma-separated ticker symbols, for example `AAPL,MSFT,PETR4.SA`.
   The jobs run once per ticker.
-- `wandb_api_key`: the W&B API key. It is required. When it is left empty,
-  the `WANDB_API_KEY` repository secret is used. A typed value is visible in
-  the form and in the run inputs, so prefer the secret.
 - `epochs`, `learning_rate` and `window_size`: training hyperparameters.
 
 It runs these jobs in order:
 
 1. `ci-check` stops the run unless the CI workflow passed for the same commit.
-2. `plan` checks the ticker symbols and the W&B key, and turns the list into
+2. `plan` checks the ticker symbols and the `WANDB_API_KEY` secret, and turns the list into
    the matrix of the next jobs.
 3. `test-end-to-end` runs the end-to-end tests.
 4. `collect-data` downloads and validates the prices of each ticker, then

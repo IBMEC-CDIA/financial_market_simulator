@@ -13,11 +13,6 @@ on:
         required: false
         default: ""
         type: string
-      wandb_api_key:
-        description: "W&B API key used when train_run_id is empty. Leave empty to use the WANDB_API_KEY secret. Typed values are not masked by GitHub in the form, so prefer the secret."
-        required: false
-        default: ""
-        type: string
       dockerhub_username:
         description: "Docker Hub account name. Leave empty to use the DOCKERHUB_USERNAME secret."
         required: false
@@ -89,7 +84,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TRAIN_RUN_ID: ${{ inputs.train_run_id }}
       TICKERS: ${{ inputs.tickers }}
-      WANDB_API_KEY: ${{ inputs.wandb_api_key || secrets.WANDB_API_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
     steps:
       - name: Check out repository
@@ -108,7 +103,7 @@ jobs:
             exit 1
           fi
           if [ -z "$TRAIN_RUN_ID" ] && [ -z "$WANDB_API_KEY" ]; then
-            echo "A W&B API key is required when train_run_id is empty: fill in wandb_api_key or set the WANDB_API_KEY secret."
+            echo "A W&B API key is required when train_run_id is empty: set the WANDB_API_KEY secret."
             exit 1
           fi
           echo "Model source inputs are valid."
