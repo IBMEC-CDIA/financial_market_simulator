@@ -13,11 +13,6 @@ on:
         required: true
         default: "AAPL"
         type: string
-      wandb_api_key:
-        description: "W&B API key. Leave empty to use the WANDB_API_KEY secret. Typed values are not masked by GitHub in the form"
-        required: false
-        default: ""
-        type: string
       epochs:
         description: "Number of training epochs"
         default: 300
@@ -89,8 +84,7 @@ jobs:
     env:
       MODEL_INPUT: ${{ inputs.model }}
       TICKERS_INPUT: ${{ inputs.tickers }}
-      WANDB_KEY_INPUT: ${{ inputs.wandb_api_key }}
-      WANDB_KEY_SECRET: ${{ secrets.WANDB_API_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
     steps:
       - name: Check out repository
@@ -142,8 +136,8 @@ jobs:
 
       - name: Require a W&B API key
         run: |
-          if [ -z "$WANDB_KEY_INPUT" ] && [ -z "$WANDB_KEY_SECRET" ]; then
-            echo "A W&B API key is required: fill in wandb_api_key or set the WANDB_API_KEY secret."
+          if [ -z "$WANDB_API_KEY" ]; then
+            echo "A W&B API key is required: set the WANDB_API_KEY secret."
             exit 1
           fi
           echo "A W&B API key was found."
@@ -209,7 +203,7 @@ jobs:
     timeout-minutes: 240
 
     env:
-      WANDB_API_KEY: ${{ inputs.wandb_api_key || secrets.WANDB_API_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       MODEL: ${{ needs.plan.outputs.model }}
       TICKERS: ${{ needs.plan.outputs.tickers_csv }}
       EPOCHS: ${{ inputs.epochs }}
