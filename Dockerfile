@@ -8,7 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     AUTOENCODER_MODEL_DIR=/app/models \
     PATH="/app/.venv/bin:$PATH"
 
-RUN apt-get update \n    && apt-get install -y --only-upgrade zlib1g \n    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --only-upgrade zlib1g \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir uv
 
