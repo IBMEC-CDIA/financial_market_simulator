@@ -9,6 +9,7 @@ import pytest
 
 from generative_models.models.run_model_training import (
     build_argument_parser,
+    build_training_options,
     build_tickers_configuration,
     load_model_module,
     main,
@@ -165,3 +166,23 @@ def test_main_rejects_an_invalid_model_before_training(tmp_path) -> None:
             )
 
     mock_manager_class.assert_not_called()
+
+
+def test_experiment_name_defaults_to_default() -> None:
+    """Check that the training options start in the default experiment."""
+    arguments = build_argument_parser().parse_args(["--tickers", "AAPL"])
+
+    options = build_training_options(arguments)
+
+    assert options.experiment_name == "default"
+
+
+def test_experiment_name_option_reaches_the_training_options() -> None:
+    """Check that --experiment-name is passed to the training options."""
+    arguments = build_argument_parser().parse_args(
+        ["--tickers", "AAPL", "--experiment-name", "aapl-baseline"]
+    )
+
+    options = build_training_options(arguments)
+
+    assert options.experiment_name == "aapl-baseline"
