@@ -51,8 +51,7 @@ ignorado.
    - sem `train_run_id`, baixa a versão `latest` do artifact
      `simple-autoencoder-<ticker>` de cada ticker do input `tickers`, pelo
      módulo `generative_models.serving.download_latest_models`. Esse modo
-     precisa da chave do wandb (input `wandb_api_key` ou secret
-     `WANDB_API_KEY`). O módulo grava `<nome>.pt` e
+     precisa da chave do wandb (secret `WANDB_API_KEY`). O módulo grava `<nome>.pt` e
      `<nome>-overfitting.json`, que o registro local lê. Os campos
      `test_loss` e `baseline_test_loss` ficam `null`, porque o artifact do
      wandb não os guarda.

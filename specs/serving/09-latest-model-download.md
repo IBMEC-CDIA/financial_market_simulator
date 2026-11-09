@@ -70,7 +70,7 @@ uv run python -m generative_models.serving.download_latest_models \
 | `--project-name` | não | `TrackingConfig.project_name` | Projeto do wandb onde estão os modelos. |
 | `--entity` | não | conta padrão do wandb | Usuário ou time do wandb. |
 
-A chave do wandb vem da variável `WANDB_API_KEY`, pelo próprio cliente do wandb. No `build.yml` ela vem do input `wandb_api_key` ou do secret `WANDB_API_KEY`.
+A chave do wandb vem da variável `WANDB_API_KEY`, pelo próprio cliente do wandb. No `build.yml` ela vem apenas do secret `WANDB_API_KEY`.
 
 ## Comportamento
 
