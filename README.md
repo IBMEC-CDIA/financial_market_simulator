@@ -344,7 +344,7 @@ tracking and the training still completes.
 The image is built by its own job, `build-image`, which starts after
 `train` succeeds. It saves the image as a workflow artifact, and the
 `push-image` job loads it, logs in to Docker Hub and pushes it with the
-`latest` tag and the commit SHA tag. Both jobs run on every branch, and
+tickers tag, the commit SHA tag and the `latest` tag. Both jobs run on every branch, and
 training failures stop them. The workflow needs these repository secrets:
 
 - `DOCKERHUB_USERNAME`: the Docker Hub account name. The image is
@@ -430,7 +430,13 @@ ticker without a registered model fails the job before the build starts. The
 report written this way has `test_loss` and `baseline_test_loss` set to `null`,
 because the wandb artifact does not store them. It fails on fixable
 `CRITICAL` or `HIGH` vulnerabilities. Then the `push-image` job logs in to
-Docker Hub and pushes the image with the commit SHA and the `latest` tags.
+Docker Hub and pushes the image with three tags: the tickers tag, the commit
+SHA and `latest`.
+
+The image name is built from the models that the API reads. The build reads the
+ticker of every `*-overfitting.json` in `models/`, lowercases them, sorts them
+and joins them with `-`. For models of `AAPL` and `MSFT` the image is
+`financial-market-simulator:aapl-msft`. The tag is limited to 120 characters.
 
 The Docker Hub account and token are taken from the `dockerhub_username` and
 `dockerhub_token` inputs of the dispatch. Leave them empty to use the
@@ -439,6 +445,53 @@ The Docker Hub account and token are taken from the `dockerhub_username` and
 
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.
+
+### Deploy workflow (`deploy.yml`)
+
+The deploy workflow is started by hand, with Run workflow. It replaces an Azure
+container instance so that it runs an image from Docker Hub. The only input is
+`image`, for example `myuser/financial-market-simulator:aapl-msft`, as the Build
+workflow pushes it.
+
+The container name and the DNS label are derived from the tag. The tag
+`aapl-msft` gives the container `fmsim-aapl-msft`, and a dot becomes a hyphen,
+so `petr4.sa` gives `fmsim-petr4-sa`. The name must be at most 63 characters.
+The DNS label must be unique in the Azure region, so two images with the same
+tag cannot run at the same time under different names.
+
+The configuration comes from repository variables and secrets:
+
+| Name | Kind | Required | What it is |
+|---|---|---|---|
+| `AZURE_RESOURCE_GROUP` | variable | yes | Resource group of the container instance. |
+| `AZURE_LOCATION` | variable | no | Azure region. Defaults to `brazilsouth`. |
+| `DEPLOY_ENVIRONMENT` | variable | no | GitHub environment of the deploy job. Defaults to `production`. |
+| `AZURE_CREDENTIALS` | secret | yes | JSON of an Azure service principal, used by `azure/login`. |
+| `DOCKERHUB_USERNAME` | secret | yes | Docker Hub account name, used by the container to pull the image. |
+| `DOCKERHUB_TOKEN` | secret | yes | Docker Hub access token, used by the container to pull the image. |
+
+Create the variables in Settings, Secrets and variables, Actions, Variables, or
+with the GitHub CLI:
+
+```bash
+gh variable set AZURE_RESOURCE_GROUP --body "<resource-group>" --repo IBMEC-CDIA/financial_market_simulator
+```
+
+The job runs in the environment named by `DEPLOY_ENVIRONMENT` and stays running
+until the deploy finishes. It waits up to 20 minutes for the instance to be
+`Running`, then up to 20 minutes for `/health` to answer and `/models/loaded` to
+list at least one model. The deploy has no rollback: if the creation fails after
+the old instance was deleted, the service stays down until the workflow runs
+again.
+
+The service principal needs the `Contributor` role on the resource group. Create
+it with:
+
+```bash
+az ad sp create-for-rbac   --name financial-market-simulator-deploy   --role Contributor   --scopes /subscriptions/<subscription-id>/resourceGroups/<resource-group>   --json-auth
+```
+
+Save the JSON printed by the command as the `AZURE_CREDENTIALS` secret.
 
 ### Signals endpoint (`GET /signals`)
 

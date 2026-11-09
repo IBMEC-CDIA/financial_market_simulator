@@ -67,8 +67,10 @@ ignorado.
    correção.
 
 6. O job `push-image` baixa a imagem do job `build-image`, faz login no
-   Docker Hub e envia as tags `<usuario>/financial-market-simulator:<sha>` e
-   `:latest`. O usuário e o token vêm dos inputs `dockerhub_username` e
+   Docker Hub e envia as tags `<usuario>/financial-market-simulator:<tickers>`,
+   `:<sha>` e `:latest`. A tag `<tickers>` é formada pelos tickers dos
+   relatórios `*-overfitting.json` de `models/`, em minúsculas, ordenados e
+   unidos por `-`, por exemplo `aapl-msft`. A tag tem no máximo 120 caracteres. O usuário e o token vêm dos inputs `dockerhub_username` e
    `dockerhub_token`, e na falta deles, dos secrets `DOCKERHUB_USERNAME` e
    `DOCKERHUB_TOKEN`. O job falha se algum dos dois estiver ausente.
 
@@ -104,3 +106,31 @@ ignorado.
 - Os artifacts do GitHub expiram conforme a retenção do repositório. Um
   build com um `train_run_id` antigo pode falhar.
 - Trocar os modelos exige um novo build da imagem.
+
+## Deploy da imagem (`deploy.yml`)
+
+1. O único input é `image`, no formato
+   `<usuario>/financial-market-simulator:<tickers>`, em minúsculas. O job
+   `validate-inputs` recusa qualquer outro formato.
+2. O mesmo job deriva o nome do container e o DNS label de `<tickers>`:
+   `fmsim-<tickers>`, com cada ponto trocado por hífen. O nome precisa ter no
+   máximo 63 caracteres e ser um DNS label válido. Ele é repassado ao job
+   `deploy` pelo output `container_name`.
+3. O job `deploy` roda no environment definido por `DEPLOY_ENVIRONMENT`
+   (padrão `production`). Ele confere a variável `AZURE_RESOURCE_GROUP` e os
+   secrets `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`. Depois faz login no Azure
+   com `AZURE_CREDENTIALS`, apaga o container com o mesmo nome, se existir, e
+   cria outro na porta `8000`, com IP público, o DNS label derivado e a imagem
+   do Docker Hub, com login para o pull.
+4. O job espera até 20 minutos o container ficar `Running`. Depois espera até
+   20 minutos `/health` responder e `/models/loaded` listar pelo menos um
+   modelo. O job só termina quando uma das duas condições falha ou ambas passam.
+5. O job `pipeline-success` falha se algum job anterior não tiver sucesso.
+
+Não há rollback. Se a criação falhar depois de apagar o container antigo, o
+serviço fica fora do ar até um novo deploy.
+
+Configuração: variáveis `AZURE_RESOURCE_GROUP` (obrigatória),
+`AZURE_LOCATION` e `DEPLOY_ENVIRONMENT` (opcionais). Secrets:
+`AZURE_CREDENTIALS`, `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`. A lista completa
+e os comandos estão no README.
