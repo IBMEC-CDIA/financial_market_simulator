@@ -167,6 +167,7 @@ jobs:
           context: .
           file: ./Dockerfile
           load: true
+          pull: true
           tags: ${{ steps.image-name.outputs.image_name }}
 
       - name: Smoke test the API container with the trained models
