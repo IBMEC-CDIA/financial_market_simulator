@@ -3,7 +3,7 @@
 - **Arquivo:** `src/generative_models/models/base_autoencoder/run_train_script.py`
 - **Arquivo de teste:** `tests/generative_models/models/base_autoencoder/test_run_train_script.py`
 - **Depende de:** specs 05 e 07
-- **Situação:** a implementar
+- **Situação:** implementado
 
 ## Objetivo
 

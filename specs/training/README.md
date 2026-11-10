@@ -19,16 +19,16 @@ no [README das specs](../README.md).
 | 01 | [Dados de mercado](01-market-data.md) | `data/market_data.py` | Fornecido | - |
 | 02 | [Normalização](02-normalization.md) | `data/normalization.py` | Fornecido | - |
 | 03 | [Dataset de janelas deslizantes](03-sliding-window-dataset.md) | `data/datasets.py` | Fornecido | - |
-| 04 | [Autoencoder denso](04-simple-autoencoder.md) | `models/base_autoencoder/autoencoder.py` | A implementar | - |
-| 05 | [Configuração do treino](05-training-config.md) | `models/base_autoencoder/config.py` | A implementar | - |
+| 04 | [Autoencoder denso](04-simple-autoencoder.md) | `models/base_autoencoder/autoencoder.py` | Implementado | - |
+| 05 | [Configuração do treino](05-training-config.md) | `models/base_autoencoder/config.py` | Implementado | - |
 | 06 | [Rastreamento com wandb](06-wandb-experiment-tracker.md) | `tracking/wandb_tracker.py` | Fornecido | - |
-| 07 | [Pipeline de treino](07-autoencoder-trainer.md) | `models/base_autoencoder/trainer.py` | A implementar | 01 a 06 |
-| 08 | [Script de linha de comando](08-train-cli.md) | `models/base_autoencoder/run_train_script.py` | A implementar | 05, 07 |
+| 07 | [Pipeline de treino](07-autoencoder-trainer.md) | `models/base_autoencoder/trainer.py` | Implementado | 01 a 06 |
+| 08 | [Script de linha de comando](08-train-cli.md) | `models/base_autoencoder/run_train_script.py` | Implementado | 05, 07 |
 
 Os caminhos de **Arquivo** são relativos a `src/generative_models/`.
 As specs fornecidas descrevem módulos que o notebook já importa do
 pacote; leia-as antes da spec 04, porque as specs 07 e 08 dependem
-delas. A implementação começa pela spec 04.
+delas. As specs 04 a 08 já estão implementadas.
 
 ## Mapa notebook -> módulos
 
