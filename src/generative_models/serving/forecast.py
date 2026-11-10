@@ -3,7 +3,6 @@
 import math
 from dataclasses import dataclass
 from datetime import date, timedelta
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +27,6 @@ REQUIRED_ARTIFACT_KEYS = (
 LOOKBACK_CALENDAR_DAYS = 120
 WEEKEND_FIRST_WEEKDAY = 5
 FORECAST_DECIMALS = 4
-CACHE_SIZE = 32
 
 
 @dataclass(frozen=True)
@@ -82,7 +80,8 @@ def regression_artifact_path(
     >>> regression_artifact_path("aapl", Path("models")).name
     'AAPL.pt'
     """
-    return model_directory / REGRESSION_DIRECTORY_NAME / f"{ticker.upper()}.pt"
+    directory = model_directory / REGRESSION_DIRECTORY_NAME
+    return directory / f"{ticker.upper()}.pt"
 
 
 def load_regression_forecaster(
@@ -131,62 +130,6 @@ def load_regression_forecaster(
         return_train_std=float(payload["return_train_std"]),
         artifact_name=str(payload["artifact_name"]),
     )
-
-
-@lru_cache(maxsize=CACHE_SIZE)
-def _cached_forecaster(
-    ticker: str,
-    model_directory: str,
-    modified_at_ns: int,
-) -> RegressionForecaster | None:
-    """Load a forecaster once per artifact version.
-
-    Parameters
-    ----------
-    ticker : str
-        Ticker whose model is loaded.
-    model_directory : str
-        Models directory, as text, so the cache key is hashable.
-    modified_at_ns : int
-        Modification time of the artifact. A new file gives a new key, so
-        a retrained model is used after a restart or a change on disk.
-
-    Returns
-    -------
-    RegressionForecaster | None
-        The forecaster, or None when there is no valid artifact.
-    """
-    return load_regression_forecaster(ticker, Path(model_directory))
-
-
-def resolve_regression_forecaster(
-    ticker: str,
-    model_directory: Path,
-) -> RegressionForecaster | None:
-    """Get the forecaster of a ticker, loading it once per artifact version.
-
-    Parameters
-    ----------
-    ticker : str
-        Ticker whose model is needed.
-    model_directory : Path
-        Directory that holds the models of the service.
-
-    Returns
-    -------
-    RegressionForecaster | None
-        The cached forecaster, or None when the ticker has no artifact.
-
-    Example
-    -------
-    >>> resolve_regression_forecaster("AAPL", Path("models")) is None
-    True
-    """
-    path = regression_artifact_path(ticker, model_directory)
-    if not path.is_file():
-        return None
-    modified_at_ns = path.stat().st_mtime_ns
-    return _cached_forecaster(ticker.upper(), str(model_directory), modified_at_ns)
 
 
 def next_business_day(
@@ -264,7 +207,7 @@ def predict_next_return(
 
     Example
     -------
-    >>> predict_next_return(forecaster, log_returns_of(closes))  # doctest: +SKIP
+    >>> predict_next_return(forecaster, returns)  # doctest: +SKIP
     0.001
     """
     window = forecaster.input_window_size
@@ -311,13 +254,15 @@ def forecast_next_close(
 
     Example
     -------
-    >>> forecast_next_close(forecaster, closes, date(2026, 5, 12))  # doctest: +SKIP
+    >>> forecast_next_close(forecaster, closes, as_of)  # doctest: +SKIP
     {'ticker': 'AAPL', 'as_of': '2026-05-12', ...}
     """
     index = pd.DatetimeIndex(pd.to_datetime(closes.index))
     if index.tz is not None:
         index = index.tz_localize(None)
-    visible = closes.to_numpy(dtype=float)[index.normalize() <= pd.Timestamp(as_of)]
+    cutoff = pd.Timestamp(as_of) + pd.Timedelta(days=1)
+    values = closes.to_numpy(dtype=float)
+    visible = values[index < cutoff]
     visible = visible[np.isfinite(visible)]
     required = forecaster.input_window_size + 1
     if len(visible) < required:

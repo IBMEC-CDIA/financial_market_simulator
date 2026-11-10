@@ -121,7 +121,7 @@ O `404` é a resposta normal para um ticker sem modelo de regressão treinado. O
 
 - A rota não usa dados depois de `as_of`, mesmo que o yfinance os tenha. Isso permite repetir a previsão dia a dia sem vazamento de informação.
 - A rota não faz treino. Se não houver artefato, a resposta é `404`.
-- O modelo é carregado uma vez por ticker e fica em memória até o processo reiniciar. Um artefato novo só entra depois de reiniciar o serviço.
+- O artefato é lido a cada requisição. Assim, um modelo treinado de novo entra na resposta sem reiniciar o serviço.
 - Esta rota não recomenda compra ou venda. A previsão é uma estimativa numérica.
 
 ## Treino do artefato

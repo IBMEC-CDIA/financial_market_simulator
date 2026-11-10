@@ -39,7 +39,7 @@ from generative_models.data.market_data import fetch_price_series
 from generative_models.serving.forecast import (
     LOOKBACK_CALENDAR_DAYS,
     forecast_next_close,
-    resolve_regression_forecaster,
+    load_regression_forecaster,
 )
 from generative_models.serving.predict_autoencoder import predict_period
 from generative_models.serving.signals import SignalItem, build_signals
@@ -701,7 +701,8 @@ def get_signals(
     tags=["Forecast"],
     summary="One-day-ahead close forecast of a ticker",
     description=(
-        "Forecast of the close of the next business day, using only the prices "
+        "Forecast of the close of the next business day, using only the "
+        "prices "
         "up to as_of. Needs the regression model of the ticker in the "
         "`regression` folder of the models directory; a ticker without it "
         "answers 404. This is an estimate, not investment advice."
@@ -731,7 +732,7 @@ def get_forecast(
     if as_of > date.today():
         raise ValueError("as_of must not be in the future.")
     model_directory = Path(os.getenv("AUTOENCODER_MODEL_DIR") or "models")
-    forecaster = resolve_regression_forecaster(ticker, model_directory)
+    forecaster = load_regression_forecaster(ticker, model_directory)
     if forecaster is None:
         raise LookupError(f"No forecast model for ticker '{ticker.upper()}'.")
     start_date = as_of - timedelta(days=LOOKBACK_CALENDAR_DAYS)
