@@ -461,6 +461,34 @@ turns the answer into `[]`. These suggestions are not investment advice.
 The output format is fixed by
 [`specs/serving/08-signals-contract.md`](specs/serving/08-signals-contract.md).
 
+### Forecast endpoint (`GET /forecast`)
+
+`GET /forecast?ticker=AAPL&as_of=2026-05-12` returns the forecast of the close
+of the next business day, using only the prices up to `as_of`. The answer has
+`ticker`, `as_of`, `target_date`, `predicted_close`, and `window_days`. A ticker
+without a trained regression model answers `404`, and an `as_of` in the future
+or with too few prices answers `422`.
+
+The model is the feed-forward regression of
+`generative_models.models.regression`. It takes the last 30 normalized log-returns
+and predicts the next one. The close is `last close * exp(predicted return)`.
+The model of each ticker is saved in `models/regression/<TICKER>.pt`. Train it
+with:
+
+```bash
+uv run python -m generative_models.serving.train_regression_forecaster --ticker AAPL
+```
+
+The training uses prices from 2018 onwards and keeps the weights of the epoch
+with the lowest validation loss. The trained models are not in git, because
+`*.pt` is ignored: the image is built with the `models/` folder that exists at
+build time.
+
+The forecast is an estimate. On the validation period, the trained models did
+not beat the naive baseline of predicting the mean return (see the output of the
+training script). The output format is fixed by
+[`specs/serving/10-forecast-contract.md`](specs/serving/10-forecast-contract.md).
+
 ### Ticker model manager
 
 `TickerModelManager` (`models/ticker_model_manager.py`) trains the model of

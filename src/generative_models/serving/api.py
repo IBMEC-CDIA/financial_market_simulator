@@ -4,6 +4,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
@@ -34,6 +35,12 @@ from generative_models.serving.model_service import (
     AutoencoderModelService,
 )
 from generative_models.serving import signals as signal_rules
+from generative_models.data.market_data import fetch_price_series
+from generative_models.serving.forecast import (
+    LOOKBACK_CALENDAR_DAYS,
+    forecast_next_close,
+    resolve_regression_forecaster,
+)
 from generative_models.serving.predict_autoencoder import predict_period
 from generative_models.serving.signals import SignalItem, build_signals
 
@@ -688,6 +695,53 @@ def get_signals(
         rule,
         datetime.now(UTC),
     )
+
+@app.get(
+    "/forecast",
+    tags=["Forecast"],
+    summary="One-day-ahead close forecast of a ticker",
+    description=(
+        "Forecast of the close of the next business day, using only the prices "
+        "up to as_of. Needs the regression model of the ticker in the "
+        "`regression` folder of the models directory; a ticker without it "
+        "answers 404. This is an estimate, not investment advice."
+    ),
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+def get_forecast(
+    ticker: Annotated[
+        str,
+        Query(
+            description="Ticker of the forecast model.",
+            examples=["AAPL"],
+        ),
+    ],
+    as_of: Annotated[
+        date,
+        Query(
+            description="Last day whose data the model may use.",
+            examples=["2026-05-12"],
+        ),
+    ],
+) -> dict[str, object]:
+    """Forecast the close of the next business day after as_of."""
+    if as_of > date.today():
+        raise ValueError("as_of must not be in the future.")
+    model_directory = Path(os.getenv("AUTOENCODER_MODEL_DIR") or "models")
+    forecaster = resolve_regression_forecaster(ticker, model_directory)
+    if forecaster is None:
+        raise LookupError(f"No forecast model for ticker '{ticker.upper()}'.")
+    start_date = as_of - timedelta(days=LOOKBACK_CALENDAR_DAYS)
+    prices = fetch_price_series(
+        forecaster.ticker,
+        start_date.isoformat(),
+        (as_of + timedelta(days=1)).isoformat(),
+    )
+    return forecast_next_close(forecaster, prices["close_price"], as_of)
+
 
 def main(
     host: str = "127.0.0.1",
