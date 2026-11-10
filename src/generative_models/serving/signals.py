@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -168,20 +168,98 @@ def build_signals(
         decision = rule(metadata, prediction_table)
         if decision is None:
             continue
-        model_name = metadata.artifact_name
-        items.append(
-            SignalItem(
-                symbol=metadata.ticker,
-                action=decision.action,
-                confidence=decision.confidence,
-                generated_at=generated_at,
-                model=(
-                    model_name
-                    if len(model_name) <= MAXIMUM_MODEL_NAME_LENGTH
-                    else None
-                ),
-                reason=decision.reason,
-            )
+        items.append(signal_item(metadata, decision, generated_at))
+
+    return items
+
+
+def signal_item(
+    metadata: AutoencoderModelMetadata,
+    decision: SignalDecision,
+    generated_at: datetime,
+) -> SignalItem:
+    """Build the public item of one decision of a model.
+
+    Parameters
+    ----------
+    metadata : AutoencoderModelMetadata
+        Training metadata of the model that made the decision.
+    decision : SignalDecision
+        Decision produced by the signal rule.
+    generated_at : datetime
+        Moment of the suggestion, in UTC.
+
+    Returns
+    -------
+    SignalItem
+        Suggestion with the model name when it fits the length limit.
+
+    Example
+    -------
+    >>> signal_item(metadata, decision, datetime.now(UTC))  # doctest: +SKIP
+    """
+    model_name = metadata.artifact_name
+    return SignalItem(
+        symbol=metadata.ticker,
+        action=decision.action,
+        confidence=decision.confidence,
+        generated_at=generated_at,
+        model=(
+            model_name
+            if len(model_name) <= MAXIMUM_MODEL_NAME_LENGTH
+            else None
+        ),
+        reason=decision.reason,
+    )
+
+
+def build_signal_history(
+    metadata: AutoencoderModelMetadata,
+    prediction_table: pd.DataFrame,
+    rule: SignalRule | None,
+) -> list[SignalItem]:
+    """Apply the signal rule to every day of a prediction table.
+
+    The rule is applied to the table up to each day, so each day gets the
+    suggestion the model would have given on that day, using only the windows
+    known until then. The first days, before the rule has enough windows, get
+    no suggestion.
+
+    Parameters
+    ----------
+    metadata : AutoencoderModelMetadata
+        Training metadata of the model.
+    prediction_table : pd.DataFrame
+        Prediction table, one row per window, indexed by date, in date order.
+    rule : SignalRule | None
+        Function that decides the signal of one day. When `None`, no signal
+        is generated.
+
+    Returns
+    -------
+    list[SignalItem]
+        One item per day with a decision, in date order. Holds are included.
+
+    Example
+    -------
+    >>> build_signal_history(metadata, table, rule)  # doctest: +SKIP
+    """
+    if rule is None:
+        return []
+
+    items = []
+    first_position = MINIMUM_WINDOWS_FOR_SIGNAL - 1
+    for position in range(first_position, len(prediction_table)):
+        decision = rule(metadata, prediction_table.iloc[: position + 1])
+        if decision is None:
+            continue
+        day = pd.Timestamp(prediction_table.index[position]).date()
+        generated_at = datetime(
+            day.year,
+            day.month,
+            day.day,
+            tzinfo=UTC,
         )
+        items.append(signal_item(metadata, decision, generated_at))
 
     return items

@@ -36,7 +36,11 @@ from generative_models.serving.model_service import (
 )
 from generative_models.serving import signals as signal_rules
 from generative_models.serving.predict_autoencoder import predict_period
-from generative_models.serving.signals import SignalItem, build_signals
+from generative_models.serving.signals import (
+    SignalItem,
+    build_signal_history,
+    build_signals,
+)
 
 DEFAULT_LOOKBACK_DAYS = 365
 PRELOAD_ENVIRONMENT_VARIABLE = "AUTOENCODER_PRELOAD_MODEL"
@@ -745,6 +749,79 @@ def get_signals(
         rule,
         datetime.now(UTC),
     )
+
+
+@app.get(
+    "/signals/history",
+    tags=["Signals"],
+    summary="List the suggestion of every day of a period",
+    description=(
+        "One item for each day of the period that the signal rule can decide, "
+        "computed as the model would have decided on that day, using only the "
+        "windows known until then. It has the same fields as `/signals`, with "
+        "`generated_at` set to the day of the window. Holds are included. The "
+        "list is empty when no signal rule is set."
+    ),
+    response_model=list[SignalItem],
+    responses={
+        404: {"model": ErrorResponse},
+        400: {"model": ErrorResponse},
+    },
+)
+def get_signal_history(
+    service: ModelServiceDependency,
+    ticker: Annotated[
+        str,
+        Query(
+            description="Ticker of the model to use.",
+            examples=["AAPL"],
+        ),
+    ],
+    start_date: Annotated[
+        date | None,
+        Query(
+            description=(
+                "First date of the period. Defaults to 365 days before "
+                "end_date."
+            ),
+            examples=["2026-01-01"],
+        ),
+    ] = None,
+    end_date: Annotated[
+        date | None,
+        Query(
+            description="Last date of the period. Defaults to today.",
+            examples=["2026-09-30"],
+        ),
+    ] = None,
+) -> list[SignalItem]:
+    """Return the suggestion of every day of a period, or an empty list."""
+    predictor = service.get_predictor(ticker)
+    rule = signal_rules.default_signal_rule
+    if rule is None:
+        return []
+
+    effective_end_date = end_date or date.today()
+    effective_start_date = start_date or (
+        effective_end_date - timedelta(days=DEFAULT_LOOKBACK_DAYS)
+    )
+    if effective_start_date >= effective_end_date:
+        raise ValueError("start_date must be earlier than end_date.")
+
+    try:
+        prediction_table = predict_period(
+            predictor,
+            effective_start_date.isoformat(),
+            effective_end_date.isoformat(),
+        )
+    except ValueError:
+        logger.info(
+            "Skipping the signal history of %s: not enough data.",
+            predictor.metadata.ticker,
+        )
+        return []
+
+    return build_signal_history(predictor.metadata, prediction_table, rule)
 
 
 def main(
