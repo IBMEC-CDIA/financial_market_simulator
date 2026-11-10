@@ -11,6 +11,5 @@ tqdm
 wandb
 fastapi
 uvicorn[standard]
-pgl-utils>=0.7.0
-arch
+pgl-utils
 jupyter
