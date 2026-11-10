@@ -39,6 +39,7 @@ def make_settings(
 
 
 def test_defaults_are_used_when_no_variable_is_set():
+    """Verify that defaults are used when no variable is set."""
     settings = settings_from_environment({})
 
     assert settings.profile == "step"
@@ -47,6 +48,7 @@ def test_defaults_are_used_when_no_variable_is_set():
 
 
 def test_values_are_read_from_the_environment():
+    """Verify that values are read from the environment."""
     settings = settings_from_environment(
         {
             "LOAD_PROFILE": " Spike ",
@@ -61,16 +63,19 @@ def test_values_are_read_from_the_environment():
 
 
 def test_unknown_profile_is_refused():
+    """Verify that unknown profile is refused."""
     with pytest.raises(ValueError, match="profile must be one of"):
         settings_from_environment({"LOAD_PROFILE": "soak"})
 
 
 def test_a_value_that_is_not_a_number_is_refused():
+    """Verify that a value that is not a number is refused."""
     with pytest.raises(ValueError, match="LOAD_MAX_USERS must be an integer"):
         settings_from_environment({"LOAD_MAX_USERS": "many"})
 
 
 def test_out_of_range_values_are_refused():
+    """Verify that out of range values are refused."""
     with pytest.raises(ValueError, match="max_users must be at least 1"):
         settings_from_environment({"LOAD_MAX_USERS": "0"})
     with pytest.raises(ValueError, match="max_failure_ratio"):
@@ -78,6 +83,7 @@ def test_out_of_range_values_are_refused():
 
 
 def test_ramp_starts_with_one_user_and_grows_to_the_maximum():
+    """Verify that ramp starts with one user and grows to the maximum."""
     settings = make_settings("ramp")
 
     counts = [stage_at(settings, second).users for second in range(0, 600, 60)]
@@ -88,10 +94,12 @@ def test_ramp_starts_with_one_user_and_grows_to_the_maximum():
 
 
 def test_ramp_is_over_after_its_duration():
+    """Verify that ramp is over after its duration."""
     assert stage_at(make_settings("ramp"), 600.0) is None
 
 
 def test_step_adds_users_at_each_stage_and_holds_the_last_one():
+    """Verify that step adds users at each stage and holds the last one."""
     settings = make_settings("step", max_users=20)
 
     assert stage_at(settings, 0.0).users == 5
@@ -103,12 +111,14 @@ def test_step_adds_users_at_each_stage_and_holds_the_last_one():
 
 
 def test_step_never_goes_above_the_maximum():
+    """Verify that step never goes above the maximum."""
     settings = make_settings("step", max_users=12)
 
     assert stage_at(settings, 120.0).users == 12
 
 
 def test_spike_drops_a_burst_and_returns_to_the_baseline():
+    """Verify that spike drops a burst and returns to the baseline."""
     settings = make_settings("spike", max_users=100)
 
     assert stage_at(settings, 0.0).users == 10
@@ -119,6 +129,7 @@ def test_spike_drops_a_burst_and_returns_to_the_baseline():
 
 
 def test_spike_baseline_is_at_least_one_user():
+    """Verify that spike baseline is at least one user."""
     settings = make_settings("spike", max_users=3)
 
     assert stage_at(settings, 0.0).users == 1
