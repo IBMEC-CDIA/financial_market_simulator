@@ -97,43 +97,110 @@ financial_market_simulator/
 
 ## Getting started
 
-### Prerequisites
+This guide starts from a machine without anything installed except Git. The
+project uses [uv](https://docs.astral.sh/uv/) to manage Python and the
+dependencies: uv installs the Python version and the packages from
+`pyproject.toml` and `uv.lock`, the same way the CI does.
 
-- [uv](https://docs.astral.sh/uv/) installed
-- Python 3.12.10 (uv can install it automatically)
+### 1. Install uv
 
-### Environment setup
+On Windows (PowerShell):
 
-Create the virtual environment with the pinned Python version:
-
-```bash
-uv venv --python 3.12.10
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-Install the full development environment (includes PyTorch with CUDA
-support, TensorFlow, Jupyter, Weights & Biases, and other tooling used
-locally):
+On macOS or Linux:
 
 ```bash
-uv pip install -r requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Copy the environment variable template and fill in the required
-values:
+Close and open the terminal, then check it:
+
+```bash
+uv --version
+```
+
+You do not need to install Python yourself: uv downloads the Python version
+the project uses (below).
+
+### 2. Get the code
+
+```bash
+git clone https://github.com/IBMEC-CDIA/financial_market_simulator.git
+cd financial_market_simulator
+```
+
+### 3. Install Python and the dependencies
+
+Install the Python version used by the project and create the virtual
+environment with every dependency needed for tests, linting and the API:
+
+```bash
+uv python install 3.12.10
+uv sync --extra dev --python 3.12.10
+```
+
+This creates the `.venv` folder inside the project. You do not need to
+activate it: run commands with `uv run`, as shown below.
+
+On Windows, `uv sync` installs PyTorch with CUDA support (the
+`pytorch-cu121` index in `pyproject.toml`). On macOS and Linux it installs
+the default PyTorch build.
+
+### 4. Configure the environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-### Running the tests
+Open `.env` and set `WANDB_API_KEY` with your Weights & Biases key. The key
+is needed to train models and to download them from wandb. The tests and the
+API with local model files do not need it. Never commit `.env`.
 
-The lightweight dependencies needed to run the test suite (NumPy,
-PyTorch and pytest) are declared in `pyproject.toml`:
+### 5. Check the installation
+
+Run the tests and the linter, the same checks the CI runs:
 
 ```bash
-uv sync --extra dev
 uv run pytest
+uv run pylint src/generative_models tests
 ```
+
+### 6. Run the API locally
+
+The API serves the model files in `models/`. Each model is a `.pt` file with
+its `*-overfitting.json` report. Get them from a successful Train run (see
+the Serving section), or from the wandb artifacts of the project, and copy
+them into `models/`. Then start the API:
+
+```bash
+uv run uvicorn generative_models.serving.api:app --port 8000
+```
+
+Open `http://127.0.0.1:8000/docs` for the interactive API docs, or
+`http://127.0.0.1:8000/health` to check that the models were loaded.
+
+### 7. Run the notebooks (optional)
+
+The notebooks in `notebooks/` use four packages that are not part of
+`pyproject.toml` yet: `pgl-utils`, `torchinfo`, `plotly` and `jupyter`.
+Install them into the project environment, then start Jupyter:
+
+```bash
+uv pip install pgl-utils torchinfo plotly jupyter
+uv run jupyter lab
+```
+
+### About `requirements.txt`
+
+`requirements.txt` is not used by the CI and does not describe the complete
+environment. It does not include `python-dotenv` (used at runtime to read
+`.env`), `pytest`, `pylint`, `great-expectations` or `httpx` (used by the
+tests), and it pins a PyTorch build (`2.5.1+cu121`) that is only published
+for Windows and Linux. Use the steps above (`uv sync`) instead of
+`pip install -r requirements.txt`.
 
 ### Specs for students
 
