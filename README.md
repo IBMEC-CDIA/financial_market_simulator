@@ -37,6 +37,187 @@ they have not been validated for trading.
 The project is used in a course, so it favors clear code, documented specs
 and reproducible workflows over performance.
 
+## Diagrams
+
+The diagrams below are written in [Mermaid](https://mermaid.js.org/), which
+GitHub renders directly in this file. They follow the code of the `main`
+branch.
+
+### How the project fits together
+
+```mermaid
+flowchart LR
+    Yahoo[(Yahoo Finance prices)] --> Train[Train workflow]
+    Train --> Wandb[(Weights and Biases)]
+    Train --> Artifact[(trained-models artifact)]
+    Artifact --> Build[Build workflow]
+    Build --> Hub[(Docker Hub image)]
+    Hub --> Deploy[Deploy workflow]
+    Deploy --> Azure[Azure container instance]
+    Client[Client] --> Azure
+    Local[models/ folder] -.-> Azure
+```
+
+### CI pipeline (`ci.yml`)
+
+Runs on every push and pull request. Each job waits for the jobs it needs.
+
+```mermaid
+flowchart LR
+    structure["structure: files and layout"] --> lint["lint: pylint"]
+    lint --> unit["unit-test: pytest"]
+    lint --> security["security: bandit and pip-audit"]
+    structure --> report["test-report"]
+    lint --> report
+    unit --> report
+    security --> report
+    report --> success["pipeline-success"]
+```
+
+### Build pipeline (`build.yml`)
+
+Started by hand. It only runs after the CI passed for the same commit.
+
+```mermaid
+flowchart LR
+    ciCheck["ci-check: CI passed for this commit"] --> buildImage["build-image: Docker image and scan"]
+    buildImage --> pushImage["push-image: Docker Hub"]
+    ciCheck --> pushImage
+    pushImage --> success["pipeline-success"]
+```
+
+### Train pipeline (`train.yml`)
+
+Started by hand. It trains the models, evaluates the overfitting and stores
+the trained models as an artifact.
+
+```mermaid
+flowchart LR
+    ciCheck["ci-check: CI passed for this commit"] --> plan["plan: check tickers and wandb key"]
+    plan --> e2e["test-end-to-end"]
+    plan --> collect["collect-data: market data"]
+    e2e --> collect
+    plan --> train["train-autoencoder"]
+    collect --> train
+    plan --> evaluate["evaluate: overfitting"]
+    train --> evaluate
+    evaluate --> success["pipeline-success"]
+```
+
+### Deploy pipeline (`deploy.yml`)
+
+Started by hand. It replaces the Azure container instance so that it runs an
+image from Docker Hub.
+
+```mermaid
+flowchart LR
+    validate["validate-inputs: image and container name"] --> deploy["deploy: replace the Azure container"]
+    deploy --> success["pipeline-success"]
+```
+
+### Classes of the main package
+
+Main classes of `src/generative_models` and how they depend on each other.
+Only the public methods are shown.
+
+```mermaid
+classDiagram
+    class ModelRegistry {
+        <<abstract>>
+        +load_model(ticker)
+        +load_all_models()
+        +get_model(ticker)
+        +list_loaded_tickers()
+    }
+    class WandbAutoencoderRegistry
+    class LocalAutoencoderRegistry
+    class AutoencoderModelService {
+        +get_instance()
+        +preload_all()
+        +get_predictor(ticker)
+        +reload()
+        +list_loaded_models()
+    }
+    class AutoencoderPredictor {
+        +predict()
+        +predict_from_prices()
+    }
+    class AutoencoderModelMetadata
+    class SimpleAutoencoder
+    class AutoencoderTrainer {
+        +prepare_data()
+        +build_model()
+        +train()
+    }
+    class AutoencoderTrainingConfig
+    class SlidingWindowReconstructionDataset
+    class WandbExperimentTracker {
+        +start_run()
+        +log_metrics()
+        +log_model()
+        +finish_run()
+    }
+    class OverfittingReport
+    class TickerModelManager
+
+    ModelRegistry <|-- WandbAutoencoderRegistry
+    ModelRegistry <|-- LocalAutoencoderRegistry
+    AutoencoderModelService --> ModelRegistry : loads models with
+    AutoencoderModelService o-- AutoencoderPredictor : keeps one per ticker
+    WandbAutoencoderRegistry ..> AutoencoderPredictor : builds
+    LocalAutoencoderRegistry ..> AutoencoderPredictor : builds
+    AutoencoderPredictor --> SimpleAutoencoder : runs
+    AutoencoderPredictor --> AutoencoderModelMetadata
+    TickerModelManager --> AutoencoderTrainer : trains with
+    AutoencoderTrainer --> AutoencoderTrainingConfig : configured by
+    AutoencoderTrainer --> SimpleAutoencoder : trains
+    AutoencoderTrainer --> SlidingWindowReconstructionDataset : builds
+    AutoencoderTrainer --> WandbExperimentTracker : logs with
+    AutoencoderTrainer ..> OverfittingReport : produces
+```
+
+### Training flow
+
+What happens when a model is trained from the command line.
+
+```mermaid
+flowchart TD
+    CLI["run_train_script or run_model_training"] --> Factory["build_trainer (trainer_factory)"]
+    Factory --> Trainer["AutoencoderTrainer.train"]
+    Trainer --> Prices["fetch_price_series (yfinance)"]
+    Prices --> Norm["normalize_series"]
+    Norm --> Data["SlidingWindowReconstructionDataset"]
+    Data --> Fit["training loop of SimpleAutoencoder"]
+    Fit --> Track["WandbExperimentTracker: log_metrics and log_model"]
+    Fit --> Report["OverfittingReport"]
+    Report --> Files["models/*.pt and *-overfitting.json"]
+```
+
+### Prediction flow
+
+What happens when a client asks for the signal history of a ticker. The
+models are loaded once, when the API starts.
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant API as FastAPI api.py
+    participant Service as AutoencoderModelService
+    participant Predictor as AutoencoderPredictor
+    participant Prices as fetch_price_series
+
+    Note over API,Service: On startup, preload_all loads every model in models/
+    Client->>API: GET /signals/history?ticker=AAPL
+    API->>Service: get_predictor("AAPL")
+    Service-->>API: predictor kept in memory
+    API->>Prices: prices of the period
+    Prices-->>API: closing prices
+    API->>Predictor: predict_from_prices(prices)
+    Predictor-->>API: reconstruction scores per window
+    API->>API: default_signal_rule for each day
+    API-->>Client: one suggestion per day (JSON)
+```
+
 ## Project structure
 
 ```
