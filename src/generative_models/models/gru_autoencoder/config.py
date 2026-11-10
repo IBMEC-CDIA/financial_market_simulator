@@ -194,7 +194,10 @@ class GRUAutoencoderTrainingConfig:
         }
 
 
-def _check_open_unit_interval(field_name: str, field_value: float) -> None:
+def _check_open_unit_interval(
+    field_name: str,
+    field_value: float,
+) -> None:
     """Raise a ValueError unless the value is strictly between 0 and 1.
 
     Parameters
