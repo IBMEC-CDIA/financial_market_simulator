@@ -58,6 +58,7 @@ financial_market_simulator/
 │   └── workflows/                 # ci.yml, train.yml, build.yml, deploy.yml
 │
 ├── docs/                          # explanatory documents of the project
+├── load_test/                     # Locust load test of the API (own uv project)
 ├── models/                        # trained models copied into the image
 ├── notebooks/                     # exploratory and teaching notebooks
 ├── specs/                         # module specs for students
@@ -469,6 +470,14 @@ decided with the windows known until that day, so the history is what the
 model would have said on each day. The fields are the same as in `/signals`,
 with `generated_at` set to the day of the window. Holds are included. The
 period defaults to the last 365 days, as in `/signals`.
+
+### Load test (`load_test/`)
+
+`load_test/` has a Locust test that sends requests to the models the API
+loads, with three load profiles: `spike` (peak), `ramp` (linear increase) and
+`step` (progressive increase). Run `bash load_test/run_profiles.sh` with the
+API running on port 8001, or see [load_test/README.md](load_test/README.md)
+for the variables and the Locust web interface.
 
 ### Ticker model manager
 
