@@ -578,6 +578,7 @@ class AutoencoderTrainer:
                     "return_train_mean": prepared_data.return_train_mean,
                     "return_train_std": prepared_data.return_train_std,
                 },
+                aliases=[self.config.tracking.experiment_name],
             )
         finally:
             self.experiment_tracker.finish_run()

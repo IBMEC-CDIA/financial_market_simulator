@@ -3,7 +3,7 @@
 - **Arquivo:** `src/generative_models/serving/signals.py` e rota `GET /signals` em `src/generative_models/serving/api.py`
 - **Arquivo de teste:** `tests/generative_models/serving/test_signals.py` e `tests/generative_models/serving/test_api_signals.py`
 - **Depende de:** specs 01, 05, 06 e 07
-- **Situação:** a implementar
+- **Situação:** implementado
 
 ## Objetivo
 
@@ -12,7 +12,7 @@ Garantir que a resposta de `GET /signals` tenha sempre o mesmo formato, para que
 ## Origem
 
 - Spec 06: o schema `SignalItem` define os campos e as validações.
-- Spec 07: a rota é a única forma pública de obter os sinais. Ela recebe um ticker e um período, como a rota de dados de mercado.
+- Spec 07: a rota `GET /signals` é a forma pública de obter o sinal de um ticker em um período. A rota `GET /signals/history` (seção própria abaixo) devolve um sinal por dia com a mesma regra.
 - Regra de conversão de `signals.py`: `default_signal_rule` (proposta, ainda a confirmar pelo time).
 
 ## Interface pública
@@ -114,7 +114,7 @@ const signals = await fetchSignals("AAPL");
 
 Quem consome a rota deve tratar a resposta assim:
 
-- `200`: array JSON, com no máximo um item. Um array vazio é uma resposta válida, não um erro.
+- `200` em `GET /signals`: array JSON, com no máximo um item. Um array vazio é uma resposta válida, não um erro.
 - `404` e `422`: corpo JSON com a chave `detail`. No `404` e no `422` de período invertido, `detail` é um texto. No `422` de validação do FastAPI (por exemplo, `ticker` ausente), `detail` é uma lista de erros. O frontend deve mostrar uma mensagem própria ao usuário final, e usar `detail` só para depuração.
 
 Exemplo de `200`:
@@ -142,15 +142,15 @@ O caminho do diretório do servidor aparece no `detail` do `404`. Essa mensagem 
 
 ## Integração com o frontend
 
-- **CORS:** a API não configura CORS. Um frontend em outra origem (outra porta ou domínio) não consegue chamar `/signals` direto do navegador. Antes de integrar, o time precisa decidir: adicionar `CORSMiddleware` com as origens permitidas, ou chamar a API por um servidor intermediário. Esta spec não adiciona CORS, porque o consumidor principal (FinBrain) não precisa dele.
+- **CORS:** a API libera as origens listadas na variável de ambiente `AUTOENCODER_CORS_ORIGINS`, separadas por vírgula. Sem essa variável, nenhuma origem externa é liberada. Um frontend em outra origem só chama `/signals` e `/signals/history` direto do navegador se a origem estiver nessa lista. O FinBrain chama a API pelo servidor e não depende dessa configuração.
 - **Escopo de dados:** cada chamada baixa os preços do período do ticker informado. Períodos longos deixam a resposta mais lenta, por isso o frontend deve pedir apenas o período necessário.
 
 ## Comportamento
 
 - A resposta é um array, mesmo quando vazio. Nunca é `null` e nunca é um objeto que envolve o array.
 - Não há campos extras. Campos novos exigem uma nova versão desta spec.
-- Todos os itens de uma mesma resposta têm o mesmo `generated_at`.
-- A rota trata um único ticker por chamada, então a lista tem no máximo um item.
+- Em `GET /signals`, todos os itens de uma mesma resposta têm o mesmo `generated_at`.
+- `GET /signals` trata um único ticker por chamada, então a lista tem no máximo um item. `GET /signals/history` é o caso de vários itens (ver a seção própria).
 - Um ticker sem decisão ou sem dados suficientes no período responde `[]`.
 - Sem regra definida (`rule` igual a `None`), a resposta é `[]` e nenhum preço é baixado.
 
@@ -166,6 +166,25 @@ O caminho do diretório do servidor aparece no `detail` do `404`. Essa mensagem 
 | `start_date` igual ou depois de `end_date` | `422` (`ValueError`) | `start_date must be earlier than end_date.` |
 | Ticker sem `ticker` na requisição | `422` (validação do FastAPI) | `ticker` |
 | Período com poucos preços | `[]`, registrado em log de nível INFO | `Skipping the signal of ...` |
+
+## Rota GET /signals/history
+
+Devolve o sinal de cada dia de um período, para o gráfico diário do FinBrain. Usa a mesma regra e o mesmo formato de `SignalItem`.
+
+Parâmetros (query string), com os mesmos padrões de `GET /signals`:
+
+- `ticker` (obrigatório).
+- `start_date` (opcional, `YYYY-MM-DD`). Padrão: 365 dias antes de `end_date`.
+- `end_date` (opcional, `YYYY-MM-DD`). Padrão: hoje.
+
+Regras da resposta:
+
+- `200` com um array JSON, com um item por dia de negociação a partir do segundo dia da janela. Um período com dados insuficientes responde `[]`.
+- Cada dia usa somente as janelas conhecidas até aquele dia, sem olhar o futuro.
+- `generated_at` é a meia-noite UTC do dia da janela. Itens de dias diferentes têm horários diferentes.
+- Ações `hold` entram na resposta.
+- Os erros são os mesmos de `GET /signals`: `404` para ticker sem modelo e `422` para período invertido.
+- Sem regra (`rule` igual a `None`), a resposta é `[]`.
 
 ## Critérios de aceite
 
@@ -184,10 +203,13 @@ Cada critério deve virar ao menos um teste.
 - **CA-09c:** um ticker sem modelo responde `404`, e um período invertido responde `422`.
 - **CA-10:** o schema OpenAPI de `SignalItem` lista os seis campos como propriedades e `symbol`, `action`, `confidence` e `generated_at` como obrigatórios.
 - **CA-11:** a rota continua respondendo `200` com `GET /models/loaded`, ou seja, nenhum endpoint existente muda.
+- **CA-12:** `GET /signals/history` responde um array JSON com um item por dia do período a partir do segundo dia da janela, cada um no formato de `SignalItem`.
+- **CA-13:** cada dia usa somente as janelas conhecidas até aquele dia, e `generated_at` é a meia-noite UTC do dia.
+- **CA-14:** sem regra, `GET /signals/history` responde `[]`.
 
 ## Fora de escopo
 
 - Não define a regra de negócio final. A regra padrão é uma proposta, confirmada pelo time em outra decisão.
 - Não adiciona autenticação, cache ou persistência dos sinais.
-- Não configura CORS. Quando o frontend precisar, a decisão de CORS é uma spec própria.
+- Não define quais origens usar em produção. Essa escolha fica com a variável `AUTOENCODER_CORS_ORIGINS` e com a configuração de implantação.
 - Não descreve versionamento de API. Mudança incompatível neste formato exige revisão desta spec e de quem consome a rota.

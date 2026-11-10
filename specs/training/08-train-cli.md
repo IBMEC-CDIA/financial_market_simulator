@@ -3,7 +3,7 @@
 - **Arquivo:** `src/generative_models/models/base_autoencoder/run_train_script.py`
 - **Arquivo de teste:** `tests/generative_models/models/base_autoencoder/test_run_train_script.py`
 - **Depende de:** specs 05 e 07
-- **Situação:** a implementar
+- **Situação:** implementado
 
 ## Objetivo
 
@@ -68,6 +68,7 @@ script.
 | `--output-directory` | `str` | `tracking.output_directory` |
 | `--env-file-path` | `str` | `tracking.env_file_path` |
 | `--device` | `str` | `device` |
+| `--experiment-name` | `str` | `tracking.experiment_name` (padrão `default`) |
 
 ### `build_training_config`
 
