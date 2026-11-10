@@ -3,7 +3,7 @@
 - **Arquivo:** `src/generative_models/serving/api.py`
 - **Arquivo de teste:** `tests/generative_models/serving/test_api.py`
 - **Depende de:** specs 01, 04, 05 e 06
-- **Situação:** a implementar
+- **Situação:** implementado
 
 ## Objetivo
 
@@ -198,4 +198,5 @@ ao final. O mock serve um `AutoencoderPredictor` com um
 
 - Autenticação e controle de acesso.
 - Sinais de compra e venda.
-- Imagem Docker e deploy (pasta `docker/`).
+- Deploy em produção. A imagem Docker que serve a API está no
+  `Dockerfile` da raiz e é documentada no README.

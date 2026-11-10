@@ -3,10 +3,11 @@
 import os
 
 import torch
-import wandb
 from dotenv import load_dotenv
 from torch import nn
 from tqdm.auto import tqdm
+
+import wandb
 
 
 class WandbExperimentTracker:
@@ -89,8 +90,13 @@ class WandbExperimentTracker:
         If a `WANDB_API_KEY` was found in the environment, an
         authenticated login is attempted. Otherwise, an anonymous
         login is attempted. If either attempt fails, tracking is
-        disabled and training can proceed without an active run.
+        disabled and training can proceed without an active run. When
+        `WANDB_MODE` is `disabled`, no login is attempted at all.
         """
+        if os.getenv("WANDB_MODE") == "disabled":
+            self.wandb_mode = "disabled"
+            return
+
         try:
             if self.wandb_api_key:
                 wandb.login(
@@ -161,13 +167,14 @@ class WandbExperimentTracker:
 
         self.wandb_run.log(metrics)
 
-    def log_model(
+    def log_model(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         model: nn.Module,
         model_name: str,
         model_file_path: str,
         description: str | None = None,
         metadata: dict[str, object] | None = None,
+        aliases: list[str] | None = None,
     ) -> None:
         """Save the model weights and register a fully described artifact.
 
@@ -200,6 +207,10 @@ class WandbExperimentTracker:
             the artifact on top of the experiment `config` (for
             example, the final training loss or dataset statistics).
             Defaults to `None`.
+        aliases : list[str] | None
+            Extra aliases for this version of the artifact, for example
+            the experiment name. The `latest` alias is always set by wandb
+            on the newest version. Defaults to `None`.
 
         Example
         -------
@@ -230,7 +241,7 @@ class WandbExperimentTracker:
         )
         model_artifact.add_file(model_file_path)
 
-        self.wandb_run.log_artifact(model_artifact)
+        self.wandb_run.log_artifact(model_artifact, aliases=aliases)
         tqdm.write(
             f"[wandb] Logged model artifact '{model_name}' "
             f"from '{model_file_path}'."

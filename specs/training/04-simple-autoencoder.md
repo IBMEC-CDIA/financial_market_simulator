@@ -1,9 +1,9 @@
 # 04 - Autoencoder denso
 
-- **Arquivo:** `src/generative_models/models/autoencoder/autoencoder.py`
-- **Arquivo de teste:** `tests/generative_models/models/autoencoder/test_autoencoder.py`
+- **Arquivo:** `src/generative_models/models/base_autoencoder/autoencoder.py`
+- **Arquivo de teste:** `tests/generative_models/models/base_autoencoder/test_autoencoder.py`
 - **Depende de:** nenhuma
-- **Situação:** a implementar
+- **Situação:** implementado
 
 ## Objetivo
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from generative_models.serving.model_registry import ModelRegistry
+from generative_models.registry.model_registry import ModelRegistry
 
 
 def test_constructor_starts_with_no_models() -> None:

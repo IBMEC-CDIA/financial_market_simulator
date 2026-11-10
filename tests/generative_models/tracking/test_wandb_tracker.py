@@ -52,6 +52,24 @@ def test_start_run_uses_anonymous_login_without_api_key(
 
 
 @patch("generative_models.tracking.wandb_tracker.wandb")
+def test_start_run_skips_login_when_wandb_mode_is_disabled(
+    mock_wandb, monkeypatch, tmp_path
+) -> None:
+    """Check that WANDB_MODE=disabled prevents any login attempt."""
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+    tracker = _make_tracker(monkeypatch, tmp_path)
+
+    tracker.start_run()
+
+    mock_wandb.login.assert_not_called()
+    mock_wandb.init.assert_called_once_with(
+        project="test-project",
+        mode="disabled",
+        config={"learning_rate": 0.001},
+    )
+
+
+@patch("generative_models.tracking.wandb_tracker.wandb")
 def test_start_run_falls_back_to_disabled_on_login_error(
     mock_wandb, monkeypatch, tmp_path
 ) -> None:
@@ -155,7 +173,10 @@ def test_log_model_saves_weights_and_logs_artifact(
     )
     artifact = mock_wandb.Artifact.return_value
     artifact.add_file.assert_called_once_with(str(model_file_path))
-    tracker.wandb_run.log_artifact.assert_called_once_with(artifact)
+    tracker.wandb_run.log_artifact.assert_called_once_with(
+        artifact,
+        aliases=None,
+    )
 
 
 @patch("generative_models.tracking.wandb_tracker.wandb")
@@ -202,3 +223,25 @@ def test_finish_run_without_active_run_does_not_raise(
     tracker = _make_tracker(monkeypatch, tmp_path)
 
     tracker.finish_run()
+
+
+@patch("generative_models.tracking.wandb_tracker.wandb")
+def test_log_model_passes_aliases_to_the_artifact_version(
+    mock_wandb, monkeypatch, tmp_path
+) -> None:
+    """Check that the aliases given to log_model reach log_artifact."""
+    tracker = _make_tracker(monkeypatch, tmp_path)
+    tracker.wandb_run = MagicMock()
+
+    tracker.log_model(
+        model=nn.Linear(2, 1),
+        model_name="test-model",
+        model_file_path=str(tmp_path / "model.pt"),
+        aliases=["aapl-baseline"],
+    )
+
+    artifact = mock_wandb.Artifact.return_value
+    tracker.wandb_run.log_artifact.assert_called_once_with(
+        artifact,
+        aliases=["aapl-baseline"],
+    )

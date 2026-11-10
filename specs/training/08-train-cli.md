@@ -1,9 +1,9 @@
 # 08 - Script de linha de comando
 
-- **Arquivo:** `src/generative_models/models/autoencoder/train_autoencoder.py`
-- **Arquivo de teste:** `tests/generative_models/models/autoencoder/test_train_autoencoder.py`
+- **Arquivo:** `src/generative_models/models/base_autoencoder/run_train_script.py`
+- **Arquivo de teste:** `tests/generative_models/models/base_autoencoder/test_run_train_script.py`
 - **Depende de:** specs 05 e 07
-- **Situação:** a implementar
+- **Situação:** implementado
 
 ## Objetivo
 
@@ -11,7 +11,7 @@ Permitir executar o treinamento completo pelo terminal, sem abrir o
 notebook, alterando qualquer hiperparâmetro por argumento:
 
 ```bash
-uv run python -m generative_models.models.autoencoder.train_autoencoder \
+uv run python -m generative_models.models.base_autoencoder.run_train_script \
     --ticker AAPL --epochs 100
 ```
 
@@ -68,6 +68,7 @@ script.
 | `--output-directory` | `str` | `tracking.output_directory` |
 | `--env-file-path` | `str` | `tracking.env_file_path` |
 | `--device` | `str` | `device` |
+| `--experiment-name` | `str` | `tracking.experiment_name` (padrão `default`) |
 
 ### `build_training_config`
 
@@ -88,7 +89,7 @@ geram o `ValueError` da validação da spec 05.
 
 `AutoencoderTrainer` deve ser importado no topo do módulo, para que
 os testes possam substituí-lo com
-`patch("generative_models.models.autoencoder.train_autoencoder.AutoencoderTrainer")`.
+`patch("generative_models.models.base_autoencoder.run_train_script.AutoencoderTrainer")`.
 
 ## Erros esperados
 

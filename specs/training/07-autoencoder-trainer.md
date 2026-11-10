@@ -1,9 +1,9 @@
 # 07 - Pipeline de treino
 
-- **Arquivo:** `src/generative_models/models/autoencoder/trainer.py`
-- **Arquivo de teste:** `tests/generative_models/models/autoencoder/test_trainer.py`
+- **Arquivo:** `src/generative_models/models/base_autoencoder/trainer.py`
+- **Arquivo de teste:** `tests/generative_models/models/base_autoencoder/test_trainer.py`
 - **Depende de:** specs 01 a 06
-- **Situação:** a implementar
+- **Situação:** implementado
 
 ## Objetivo
 
@@ -98,14 +98,14 @@ class AutoencoderTrainer:
 
 Atributos públicos de `AutoencoderTrainer`: `ticker`, `config`,
 `device` e `experiment_tracker`. O pacote
-`generative_models.models.autoencoder` deve reexportar
+`generative_models.models.base_autoencoder` deve reexportar
 `SimpleAutoencoder`, `AutoencoderTrainer` e
 `AutoencoderTrainingResult`.
 
 `fetch_price_series` deve ser importada no topo de `trainer.py`
 (`from generative_models.data.market_data import fetch_price_series`),
 para que os testes possam substituí-la com
-`patch("generative_models.models.autoencoder.trainer.fetch_price_series")`.
+`patch("generative_models.models.base_autoencoder.trainer.fetch_price_series")`.
 
 ## Comportamento
 
