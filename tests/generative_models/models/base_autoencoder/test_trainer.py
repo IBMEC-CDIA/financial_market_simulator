@@ -271,6 +271,28 @@ def test_train_returns_finite_results(
 
 
 @patch(FETCH_PRICE_SERIES_PATH)
+def test_log_model_registers_the_model_under_the_experiment_alias(
+    mock_fetch_price_series, tmp_path
+) -> None:
+    """Check that the trained model gets the alias of its experiment."""
+    mock_fetch_price_series.return_value = _make_price_frame(101)
+    experiment_tracker = MagicMock()
+    config = _make_config(tmp_path)
+    config.tracking.experiment_name = "aapl-baseline"
+    trainer = AutoencoderTrainer(
+        ticker="PETR4.SA",
+        config=config,
+        experiment_tracker=experiment_tracker,
+    )
+
+    trainer.train()
+
+    assert experiment_tracker.log_model.call_args.kwargs["aliases"] == [
+        "aapl-baseline"
+    ]
+
+
+@patch(FETCH_PRICE_SERIES_PATH)
 def test_log_model_metadata_contains_training_summary(
     mock_fetch_price_series, tmp_path
 ) -> None:

@@ -1,6 +1,6 @@
---extra-index-url https://download.pytorch.org/whl/cu130
+--extra-index-url https://download.pytorch.org/whl/cu121
 
-torch==2.13.0+cu130
+torch==2.5.1+cu121
 
 numpy
 pandas

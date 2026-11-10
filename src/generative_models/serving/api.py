@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import uvicorn
 from fastapi import Depends, FastAPI, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from wandb.errors import CommError
 from wandb.sdk.mailbox.mailbox import MailboxClosedError
@@ -35,7 +36,11 @@ from generative_models.serving.model_service import (
 )
 from generative_models.serving import signals as signal_rules
 from generative_models.serving.predict_autoencoder import predict_period
-from generative_models.serving.signals import SignalItem, build_signals
+from generative_models.serving.signals import (
+    SignalItem,
+    build_signal_history,
+    build_signals,
+)
 
 DEFAULT_LOOKBACK_DAYS = 365
 PRELOAD_ENVIRONMENT_VARIABLE = "AUTOENCODER_PRELOAD_MODEL"
@@ -139,6 +144,62 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+
+CORS_ORIGINS_ENVIRONMENT_VARIABLE = "AUTOENCODER_CORS_ORIGINS"
+
+
+def cors_origins_from_environment() -> list[str]:
+    """Read the origins allowed to call the API from a browser.
+
+    Returns
+    -------
+    list[str]
+        Origins listed in `AUTOENCODER_CORS_ORIGINS`, separated by commas.
+        Empty when the variable is not set, so no browser origin is allowed.
+
+    Example
+    -------
+    >>> cors_origins_from_environment()  # doctest: +SKIP
+    ['http://localhost:5500']
+    """
+    raw = os.getenv(CORS_ORIGINS_ENVIRONMENT_VARIABLE, "")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def add_cors_middleware(
+    application: FastAPI,
+    origins: list[str],
+) -> None:
+    """Allow the given browser origins to call the application.
+
+    Parameters
+    ----------
+    application : FastAPI
+        Application that receives the middleware.
+    origins : list[str]
+        Origins allowed to call the API. Nothing is added when empty.
+
+    Returns
+    -------
+    None
+        The middleware is added to the application.
+
+    Example
+    -------
+    >>> add_cors_middleware(app, ["http://localhost:5500"])  # doctest: +SKIP
+    """
+    if not origins:
+        return
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+
+
+add_cors_middleware(app, cors_origins_from_environment())
 
 def _error_message(error: Exception) -> str:
     """Return the message of an exception without Python's extra quotes.
@@ -688,6 +749,80 @@ def get_signals(
         rule,
         datetime.now(UTC),
     )
+
+
+@app.get(
+    "/signals/history",
+    tags=["Signals"],
+    summary="List the suggestion of every day of a period",
+    description=(
+        "One item for each day of the period that the signal rule can decide, "
+        "computed as the model would have decided on that day, using only the "
+        "windows known until then. It has the same fields as `/signals`, with "
+        "`generated_at` set to the day of the window. Holds are included. The "
+        "list is empty when no signal rule is set."
+    ),
+    response_model=list[SignalItem],
+    responses={
+        404: {"model": ErrorResponse},
+        400: {"model": ErrorResponse},
+    },
+)
+def get_signal_history(
+    service: ModelServiceDependency,
+    ticker: Annotated[
+        str,
+        Query(
+            description="Ticker of the model to use.",
+            examples=["AAPL"],
+        ),
+    ],
+    start_date: Annotated[
+        date | None,
+        Query(
+            description=(
+                "First date of the period. Defaults to 365 days before "
+                "end_date."
+            ),
+            examples=["2026-01-01"],
+        ),
+    ] = None,
+    end_date: Annotated[
+        date | None,
+        Query(
+            description="Last date of the period. Defaults to today.",
+            examples=["2026-09-30"],
+        ),
+    ] = None,
+) -> list[SignalItem]:
+    """Return the suggestion of every day of a period, or an empty list."""
+    predictor = service.get_predictor(ticker)
+    rule = signal_rules.default_signal_rule
+    if rule is None:
+        return []
+
+    effective_end_date = end_date or date.today()
+    effective_start_date = start_date or (
+        effective_end_date - timedelta(days=DEFAULT_LOOKBACK_DAYS)
+    )
+    if effective_start_date >= effective_end_date:
+        raise ValueError("start_date must be earlier than end_date.")
+
+    try:
+        prediction_table = predict_period(
+            predictor,
+            effective_start_date.isoformat(),
+            effective_end_date.isoformat(),
+        )
+    except ValueError:
+        logger.info(
+            "Skipping the signal history of %s: not enough data.",
+            predictor.metadata.ticker,
+        )
+        return []
+
+    return build_signal_history(predictor.metadata, prediction_table, rule)
+
 
 def main(
     host: str = "127.0.0.1",

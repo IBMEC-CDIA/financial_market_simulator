@@ -161,6 +161,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=defaults.device,
         help="Device for training, for example cpu or cuda.",
     )
+    parser.add_argument(
+        "--experiment-name",
+        type=str,
+        default=defaults.experiment_name,
+        help=(
+            "Experiment the models are registered under, used as the alias "
+            "of the models in wandb. Lowercase letters, digits and hyphens, "
+            "at most 40 characters, and not 'latest'."
+        ),
+    )
 
     return parser
 
@@ -186,6 +196,7 @@ def build_training_options(arguments: argparse.Namespace) -> TrainingOptions:
         window_size=arguments.window_size,
         output_directory=arguments.output_directory,
         device=arguments.device,
+        experiment_name=arguments.experiment_name,
     )
 
 

@@ -92,6 +92,7 @@ def test_build_argument_parser_defaults_to_the_models_directory() -> None:
 
     assert arguments.output_directory == "models"
     assert arguments.entity is None
+    assert arguments.alias == "latest"
 
 
 def test_build_report_data_computes_the_overfitting_ratio() -> None:
@@ -181,3 +182,53 @@ def test_main_downloads_every_ticker(tmp_path, monkeypatch, capsys) -> None:
     assert all(path.exists() for path in report_paths)
     assert "Downloaded the latest model of AAPL" in capsys.readouterr().out
     assert json.loads(report_paths[0].read_text(encoding="utf-8"))["ticker"]
+
+
+def test_download_model_of_an_experiment_uses_its_alias(tmp_path) -> None:
+    """Check that the alias of the experiment selects the artifact version."""
+    artifact = _build_fake_artifact(_metadata(), ["weights.pt"])
+    registry = _registry_with(artifact)
+
+    download_latest_model(
+        registry,
+        "AAPL",
+        tmp_path,
+        alias="aapl-baseline",
+    )
+
+    registry.api.artifact.assert_called_once_with(
+        f"{PROJECT_PATH}/simple-autoencoder-aapl:aapl-baseline",
+        type="model",
+    )
+
+
+def test_main_passes_the_alias_to_every_download(
+    tmp_path, monkeypatch
+) -> None:
+    """Check that the --alias option is used for each ticker."""
+    artifact = _build_fake_artifact(_metadata(), ["weights.pt"])
+    registry = _registry_with(artifact)
+    monkeypatch.setattr(
+        download_latest_models,
+        "WandbAutoencoderRegistry",
+        MagicMock(return_value=registry),
+    )
+
+    main(
+        [
+            "--tickers",
+            "AAPL,MSFT",
+            "--output-directory",
+            str(tmp_path / "models"),
+            "--alias",
+            "aapl-baseline",
+        ]
+    )
+
+    requested_paths = [
+        call.args[0] for call in registry.api.artifact.call_args_list
+    ]
+    assert requested_paths == [
+        f"{PROJECT_PATH}/simple-autoencoder-aapl:aapl-baseline",
+        f"{PROJECT_PATH}/simple-autoencoder-msft:aapl-baseline",
+    ]

@@ -12,6 +12,7 @@ from generative_models.serving.autoencoder_predictor import (
 )
 from generative_models.serving.signals import (
     SignalDecision,
+    build_signal_history,
     build_signals,
     clip_confidence,
     default_signal_rule,
@@ -306,3 +307,51 @@ def test_model_and_reason_can_be_null() -> None:
 
     assert item.model is None
     assert item.reason is None
+
+
+def test_history_gives_one_item_per_day_from_the_second_window() -> None:
+    """Check that the history has one item per day from the second window."""
+    table = _prediction_table(
+        closes=[10.0, 11.0, 9.0, 12.0],
+        scores=[0.5, 0.6, 2.0, 0.4],
+    )
+    items = build_signal_history(
+        _metadata("AAPL", "simple-aapl"),
+        table,
+        default_signal_rule,
+    )
+
+    assert len(items) == 3
+    assert [item.generated_at.date().isoformat() for item in items] == [
+        "2026-10-02",
+        "2026-10-05",
+        "2026-10-06",
+    ]
+    assert [item.action for item in items] == ["hold", "buy", "hold"]
+
+
+def test_history_uses_only_the_windows_known_each_day() -> None:
+    """Check that each day is decided without the windows after it."""
+    table = _prediction_table(
+        closes=[10.0, 11.0, 9.0, 12.0],
+        scores=[0.5, 0.6, 0.7, 2.0],
+    )
+    rule_calls = []
+
+    def rule(_metadata, prediction_table):
+        """Record the size of the table seen by the rule."""
+        rule_calls.append(len(prediction_table))
+        return SignalDecision(action="hold", confidence=0.5)
+
+    build_signal_history(_metadata("AAPL", "simple-aapl"), table, rule)
+    assert rule_calls == [2, 3, 4]
+
+
+def test_history_without_a_rule_is_empty() -> None:
+    """Check that the history is empty when there is no rule."""
+    table = _prediction_table(closes=[10.0, 11.0], scores=[0.5, 0.6])
+    assert not build_signal_history(
+        _metadata("AAPL", "simple-aapl"),
+        table,
+        None,
+    )

@@ -293,3 +293,45 @@ def test_signal_item_schema_matches_the_contract(signals_client) -> None:
         "sell",
         "hold",
     ]
+
+
+def test_history_route_gives_the_decision_of_each_day(
+    signals_client,
+    fake_prices,
+) -> None:
+    """Check that the history route answers one item per decided day."""
+    response = signals_client.get(
+        "/signals/history",
+        params={
+            "ticker": "AAPL",
+            "start_date": "2026-10-01",
+            "end_date": "2026-10-02",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["symbol"] == "AAPL"
+    assert body[0]["action"] == "buy"
+    assert body[0]["generated_at"].startswith("2026-10-02")
+    assert fake_prices == [("2026-10-01", "2026-10-02")]
+
+
+def test_history_route_is_empty_when_the_period_is_too_short(
+    signals_client,
+    fake_prices,
+) -> None:
+    """Check that the history route answers [] when the model cannot score."""
+    response = signals_client.get(
+        "/signals/history",
+        params={
+            "ticker": "MSFT",
+            "start_date": "2026-10-01",
+            "end_date": "2026-10-02",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+    assert fake_prices == [("2026-10-01", "2026-10-02")]

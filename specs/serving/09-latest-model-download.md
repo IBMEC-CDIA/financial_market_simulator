@@ -7,7 +7,7 @@
 
 ## Objetivo
 
-Preparar a pasta `models/` com a versão `latest` de cada modelo registrado no wandb, para que o build da imagem funcione sem um run de treino. Quem usa é o job `build-image` do `build.yml` quando o input `train_run_id` está vazio.
+Preparar a pasta `models/` com a versão de cada modelo registrado no wandb sob o alias do experimento, para que o build da imagem funcione sem um run de treino. Quem usa é o job `build-image` do `build.yml` quando o input `train_run_id` está vazio.
 
 ## Origem
 
@@ -70,12 +70,12 @@ uv run python -m generative_models.serving.download_latest_models \
 | `--project-name` | não | `TrackingConfig.project_name` | Projeto do wandb onde estão os modelos. |
 | `--entity` | não | conta padrão do wandb | Usuário ou time do wandb. |
 
-A chave do wandb vem da variável `WANDB_API_KEY`, pelo próprio cliente do wandb. No `build.yml` ela vem do input `wandb_api_key` ou do secret `WANDB_API_KEY`.
+A chave do wandb vem da variável `WANDB_API_KEY`, pelo próprio cliente do wandb. No `build.yml` ela vem apenas do secret `WANDB_API_KEY`.
 
 ## Comportamento
 
 1. `main` lê as opções, separa os tickers e cria a pasta de saída. A validação dos tickers acontece antes de qualquer chamada ao wandb.
-2. Para cada ticker, `download_latest_model` busca o artifact `<projeto>/simple-autoencoder-<ticker_slug>:latest` do tipo `model`.
+2. Para cada ticker, `download_latest_model` busca o artifact `<projeto>/simple-autoencoder-<ticker_slug>:<alias>` do tipo `model`. O alias padrão é `latest`, e o build passa o nome do experimento.
 3. Antes do download, confere se os metadados do artifact têm as chaves de `REQUIRED_METADATA_KEYS`. Se faltar alguma, o script para com erro.
 4. O artifact é baixado para uma pasta temporária. O primeiro arquivo `*.pt` é copiado para `<output>/simple-autoencoder-<ticker_slug>.pt`.
 5. `build_report_data` monta o relatório com os valores do artifact e grava `<output>/simple-autoencoder-<ticker_slug>-overfitting.json`, em JSON com recuo de 2 espaços.
@@ -94,7 +94,7 @@ O JSON gravado é lido pelo `load_overfitting_report` (spec 04 do `project_struc
 | Situação | Exceção | Mensagem (trecho) |
 |---|---|---|
 | `--tickers` vazio ou só com separadores | `ValueError` | `At least one ticker is required.` |
-| Artifact `latest` inexistente no wandb | erro do cliente do wandb (`CommError`) | nome do artifact |
+| Artifact com o alias inexistente no wandb | erro do cliente do wandb (`CommError`) | nome do artifact |
 | Metadados sem chave necessária | `ValueError` | `is missing metadata required for inference: <chaves>.` |
 | Artifact sem arquivo `.pt` | `FileNotFoundError` | `has no .pt weights file.` |
 | Opção desconhecida ou ausente | `SystemExit` (argparse) | mensagem do argparse |

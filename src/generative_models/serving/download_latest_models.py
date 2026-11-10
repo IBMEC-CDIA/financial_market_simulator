@@ -26,6 +26,7 @@ from generative_models.serving.wandb_autoencoder_registry import (
 
 REPORT_SUFFIX = "-overfitting.json"
 DEFAULT_OUTPUT_DIRECTORY = "models"
+DEFAULT_ALIAS = "latest"
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -71,6 +72,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="wandb entity (user or team). Defaults to the account entity.",
+    )
+    parser.add_argument(
+        "--alias",
+        type=str,
+        default=DEFAULT_ALIAS,
+        help=(
+            "Alias of the model version to download. Use an experiment name "
+            "to get the models of that experiment, or latest for the newest "
+            "model of each ticker."
+        ),
     )
 
     return parser
@@ -188,8 +199,9 @@ def download_latest_model(
     registry: WandbAutoencoderRegistry,
     ticker: str,
     output_directory: Path,
+    alias: str = DEFAULT_ALIAS,
 ) -> Path:
-    """Download the latest model of a ticker and write its local files.
+    """Download the model of a ticker with an alias and write its files.
 
     Parameters
     ----------
@@ -200,6 +212,9 @@ def download_latest_model(
     output_directory : Path
         Directory where `<name>.pt` and `<name>-overfitting.json` are
         written. It must already exist.
+    alias : str
+        Alias of the model version to download, `"latest"` by default.
+        An experiment name selects the models registered under it.
 
     Returns
     -------
@@ -215,10 +230,15 @@ def download_latest_model(
 
     Example
     -------
-    >>> report_path = download_latest_model(registry, "AAPL", Path("models"))
+    >>> report_path = download_latest_model(
+    ...     registry,
+    ...     "AAPL",
+    ...     Path("models"),
+    ...     alias="aapl-baseline",
+    ... )
     """
     model_name = build_model_name(ticker)
-    artifact_path = f"{registry.project_path}/{model_name}:latest"
+    artifact_path = f"{registry.project_path}/{model_name}:{alias}"
     artifact = registry.api.artifact(artifact_path, type="model")
 
     missing_keys = [
@@ -293,6 +313,7 @@ def main(
             registry,
             ticker,
             output_directory,
+            alias=arguments.alias,
         )
         print(f"Downloaded the latest model of {ticker}: {report_path}")
         report_paths.append(report_path)

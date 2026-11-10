@@ -1,0 +1,8 @@
+[project]
+name = "financial-market-simulator-load-test"
+version = "0.1.0"
+description = "Locust load test for the autoencoder serving API"
+requires-python = ">=3.10"
+dependencies = [
+    "locust",
+]
