@@ -4,7 +4,6 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
@@ -12,6 +11,7 @@ import numpy as np
 import pandas as pd
 import uvicorn
 from fastapi import Depends, FastAPI, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from wandb.errors import CommError
 from wandb.sdk.mailbox.mailbox import MailboxClosedError
@@ -35,12 +35,6 @@ from generative_models.serving.model_service import (
     AutoencoderModelService,
 )
 from generative_models.serving import signals as signal_rules
-from generative_models.data.market_data import fetch_price_series
-from generative_models.serving.forecast import (
-    LOOKBACK_CALENDAR_DAYS,
-    forecast_next_close,
-    load_regression_forecaster,
-)
 from generative_models.serving.predict_autoencoder import predict_period
 from generative_models.serving.signals import SignalItem, build_signals
 
@@ -146,6 +140,62 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+
+CORS_ORIGINS_ENVIRONMENT_VARIABLE = "AUTOENCODER_CORS_ORIGINS"
+
+
+def cors_origins_from_environment() -> list[str]:
+    """Read the origins allowed to call the API from a browser.
+
+    Returns
+    -------
+    list[str]
+        Origins listed in `AUTOENCODER_CORS_ORIGINS`, separated by commas.
+        Empty when the variable is not set, so no browser origin is allowed.
+
+    Example
+    -------
+    >>> cors_origins_from_environment()  # doctest: +SKIP
+    ['http://localhost:5500']
+    """
+    raw = os.getenv(CORS_ORIGINS_ENVIRONMENT_VARIABLE, "")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def add_cors_middleware(
+    application: FastAPI,
+    origins: list[str],
+) -> None:
+    """Allow the given browser origins to call the application.
+
+    Parameters
+    ----------
+    application : FastAPI
+        Application that receives the middleware.
+    origins : list[str]
+        Origins allowed to call the API. Nothing is added when empty.
+
+    Returns
+    -------
+    None
+        The middleware is added to the application.
+
+    Example
+    -------
+    >>> add_cors_middleware(app, ["http://localhost:5500"])  # doctest: +SKIP
+    """
+    if not origins:
+        return
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+
+
+add_cors_middleware(app, cors_origins_from_environment())
 
 def _error_message(error: Exception) -> str:
     """Return the message of an exception without Python's extra quotes.
@@ -695,53 +745,6 @@ def get_signals(
         rule,
         datetime.now(UTC),
     )
-
-@app.get(
-    "/forecast",
-    tags=["Forecast"],
-    summary="One-day-ahead close forecast of a ticker",
-    description=(
-        "Forecast of the close of the next business day, using only the "
-        "prices "
-        "up to as_of. Needs the regression model of the ticker in the "
-        "`regression` folder of the models directory; a ticker without it "
-        "answers 404. This is an estimate, not investment advice."
-    ),
-    responses={
-        404: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
-    },
-)
-def get_forecast(
-    ticker: Annotated[
-        str,
-        Query(
-            description="Ticker of the forecast model.",
-            examples=["AAPL"],
-        ),
-    ],
-    as_of: Annotated[
-        date,
-        Query(
-            description="Last day whose data the model may use.",
-            examples=["2026-05-12"],
-        ),
-    ],
-) -> dict[str, object]:
-    """Forecast the close of the next business day after as_of."""
-    if as_of > date.today():
-        raise ValueError("as_of must not be in the future.")
-    model_directory = Path(os.getenv("AUTOENCODER_MODEL_DIR") or "models")
-    forecaster = load_regression_forecaster(ticker, model_directory)
-    if forecaster is None:
-        raise LookupError(f"No forecast model for ticker '{ticker.upper()}'.")
-    start_date = as_of - timedelta(days=LOOKBACK_CALENDAR_DAYS)
-    prices = fetch_price_series(
-        forecaster.ticker,
-        start_date.isoformat(),
-        (as_of + timedelta(days=1)).isoformat(),
-    )
-    return forecast_next_close(forecaster, prices["close_price"], as_of)
 
 
 def main(
