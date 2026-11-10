@@ -461,6 +461,15 @@ turns the answer into `[]`. These suggestions are not investment advice.
 The output format is fixed by
 [`specs/serving/08-signals-contract.md`](specs/serving/08-signals-contract.md).
 
+### Signal history endpoint (`GET /signals/history`)
+
+`GET /signals/history?ticker=AAPL&start_date=…&end_date=…` returns one
+suggestion for each day of the period that the rule can decide. Each day is
+decided with the windows known until that day, so the history is what the
+model would have said on each day. The fields are the same as in `/signals`,
+with `generated_at` set to the day of the window. Holds are included. The
+period defaults to the last 365 days, as in `/signals`.
+
 ### Ticker model manager
 
 `TickerModelManager` (`models/ticker_model_manager.py`) trains the model of
