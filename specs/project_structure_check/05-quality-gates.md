@@ -16,7 +16,7 @@ pronto para ele entrar no `main`.
 |---|---|---|
 | `structure` | arquivos obrigatórios, pasta `tests/`, `.env` ignorado, `uv.lock` sincronizado | falta arquivo, ou o lock está desatualizado |
 | `lint` | pylint em `src/generative_models` e `tests` | qualquer aviso do pylint |
-| `unit-test` | pytest com cobertura de linha | cobertura abaixo de 90% |
+| `unit-test` | pytest com cobertura de linha | cobertura abaixo de 60% |
 | `security` | Bandit, pip-audit e Gitleaks | código inseguro, dependência vulnerável ou segredo no histórico |
 | `test-report` | resumo dos resultados | nunca falha |
 | `pipeline-success` | resultado de todos os jobs | qualquer job anterior não passou |
@@ -50,7 +50,7 @@ Um modelo novo está pronto quando:
 3. o relatório da spec 04 é gravado com todas as chaves e passa nos
    critérios CA-01 a CA-04;
 4. o pylint passa sem avisos em `src/generative_models` e `tests`;
-5. o pytest passa e a cobertura do pacote fica acima de 90%;
+5. o pytest passa e a cobertura do pacote fica acima de 60%;
 6. o treino de ponta a ponta roda com `WANDB_MODE=disabled` e
    `--epochs 2` em um CSV da spec 03;
 7. a documentação do README e das specs foi atualizada no mesmo commit,

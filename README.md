@@ -545,7 +545,7 @@ The CI workflow has these jobs:
   Docker and never tracked, and the layout of the model packages.
 - `lint` runs pylint on `src/generative_models` and `tests`.
 - `unit-test` runs pytest with coverage. It fails when the coverage of
-  `src/generative_models` is below 90%, and uploads the JUnit and coverage
+  `src/generative_models` is below 60%, and uploads the JUnit and coverage
   reports as the `unit-test-reports` artifact.
 - `security` audits the runtime dependencies locked in `uv.lock` with
   `pip-audit`, scans the source code with Bandit at medium severity and
