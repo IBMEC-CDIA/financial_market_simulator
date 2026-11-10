@@ -195,28 +195,24 @@ flowchart TD
 
 ### Prediction flow
 
-What happens when a client asks for the signal history of a ticker. The
-models are loaded once, when the API starts.
+When a client asks for the signal history of a ticker, the request goes through the API, the model service and the predictor. The
+models are loaded once, when the API starts (`preload_all`). A request
+then uses the predictor kept in memory for its ticker.
 
 ```mermaid
 sequenceDiagram
-    actor Client
-    participant API as FastAPI api.py
-    participant Service as AutoencoderModelService
-    participant Predictor as AutoencoderPredictor
-    participant Prices as fetch_price_series
-
-    Note over API,Service: On startup, preload_all loads every model in models/
-    Client->>API: GET /signals/history?ticker=AAPL
-    API->>Service: get_predictor("AAPL")
+    participant Client
+    participant API
+    participant Service
+    participant Predictor
+    Client->>API: GET signals history for a ticker
+    API->>Service: get predictor for the ticker
     Service-->>API: predictor kept in memory
-    API->>Prices: prices of the period
-    Prices-->>API: closing prices
-    API->>Predictor: predict_from_prices(prices)
+    API->>Predictor: predict from the prices of the period
     Predictor-->>API: reconstruction scores per window
-    API->>API: default_signal_rule for each day
-    API-->>Client: one suggestion per day (JSON)
+    API-->>Client: one suggestion per day as JSON
 ```
+
 
 ## Project structure
 
