@@ -15,7 +15,7 @@ class LSTMAutoencoder(nn.Module):
 
     The reconstruction error of a window is used as an anomaly score:
     windows that the model cannot reproduce well are unusual with
-    respect to the training data.
+    respect to the training data. 
 
     Parameters
     ----------
