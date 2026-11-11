@@ -229,7 +229,8 @@ def test_main_opens_the_wandb_project_of_the_model(
     tmp_path, monkeypatch
 ) -> None:
     """Check that the registry reads the wandb project of the model family."""
-    registry = _registry_with(_build_fake_artifact(_metadata(), ["weights.pt"]))
+    artifact = _build_fake_artifact(_metadata(), ["weights.pt"])
+    registry = _registry_with(artifact)
     registry_class = MagicMock(return_value=registry)
     monkeypatch.setattr(
         download_latest_models,
