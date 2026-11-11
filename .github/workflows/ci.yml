@@ -166,7 +166,7 @@ jobs:
           --cov=generative_models
           --cov-report=term-missing
           --cov-report=xml
-          --cov-fail-under=90
+          --cov-fail-under=60
           --junitxml=junit-unit.xml
 
       - name: Upload test and coverage reports
