@@ -13,11 +13,6 @@ on:
         required: true
         default: "AAPL"
         type: string
-      experiment:
-        description: "Experiment the models are registered under, for example aapl-baseline. The build picks the models of an experiment by this name. Lowercase letters, digits and hyphens, at most 40 characters, not 'latest'."
-        required: false
-        default: "default"
-        type: string
       epochs:
         description: "Number of training epochs"
         default: 300
@@ -85,12 +80,10 @@ jobs:
       model: ${{ steps.model.outputs.model }}
       tickers: ${{ steps.parse.outputs.tickers }}
       tickers_csv: ${{ steps.parse.outputs.tickers_csv }}
-      experiment: ${{ steps.experiment.outputs.experiment }}
 
     env:
       MODEL_INPUT: ${{ inputs.model }}
       TICKERS_INPUT: ${{ inputs.tickers }}
-      EXPERIMENT_INPUT: ${{ inputs.experiment }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
     steps:
@@ -141,15 +134,6 @@ jobs:
           echo "tickers_csv=$tickers_csv" >> "$GITHUB_OUTPUT"
           echo "Tickers to train: $tickers_csv"
 
-      - name: Check the experiment name
-        id: experiment
-        run: |
-          if [ "$EXPERIMENT_INPUT" = "latest" ] || ! printf '%s' "$EXPERIMENT_INPUT" | grep -Eq '^[a-z0-9][a-z0-9-]{0,39}$'; then
-            echo "Invalid experiment name: $EXPERIMENT_INPUT. Lowercase letters, digits and hyphens, at most 40 characters, not 'latest'."
-            exit 1
-          fi
-          echo "experiment=$EXPERIMENT_INPUT" >> "$GITHUB_OUTPUT"
-          echo "Experiment to register the models under: $EXPERIMENT_INPUT"
 
       - name: Require a W&B API key
         run: |
@@ -222,7 +206,6 @@ jobs:
     env:
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       MODEL: ${{ needs.plan.outputs.model }}
-      EXPERIMENT: ${{ needs.plan.outputs.experiment }}
       TICKERS: ${{ needs.plan.outputs.tickers_csv }}
       EPOCHS: ${{ inputs.epochs }}
       LEARNING_RATE: ${{ inputs.learning_rate }}
@@ -249,7 +232,6 @@ jobs:
           --epochs "$EPOCHS"
           --learning-rate "$LEARNING_RATE"
           --window-size "$WINDOW_SIZE"
-          --experiment-name "$EXPERIMENT"
           --device cpu
           --output-directory artifacts
 

@@ -7,7 +7,7 @@
 
 ## Objetivo
 
-Preparar a pasta `models/` com a versão de cada modelo registrado no wandb sob o alias do experimento, para que o build da imagem funcione sem um run de treino. Quem usa é o job `build-image` do `build.yml` quando o input `train_run_id` está vazio.
+Preparar a pasta `models/` com a versão de cada modelo registrado no wandb sob o experimento do modelo, para que o build da imagem funcione sem um run de treino. Quem usa é o job `build-image` do `build.yml` quando o input `train_run_id` está vazio. O experimento e o prefixo dos artifacts são derivados do pacote do modelo (`model_names.py`), sem configuração extra.
 
 ## Origem
 
@@ -60,6 +60,7 @@ Linha de comando:
 ```bash
 uv run python -m generative_models.serving.download_latest_models \
   --tickers PETR4.SA,AAPL \
+  --model convolutional_autoencoder \
   --output-directory models
 ```
 
@@ -69,13 +70,14 @@ uv run python -m generative_models.serving.download_latest_models \
 | `--output-directory` | não | `models` | Pasta onde os arquivos são gravados. É criada se não existir. |
 | `--project-name` | não | `TrackingConfig.project_name` | Projeto do wandb onde estão os modelos. |
 | `--entity` | não | conta padrão do wandb | Usuário ou time do wandb. |
+| `--model` | sim | - | Pacote do modelo, por exemplo `convolutional_autoencoder`. Dele saem o experimento (`convolutional-autoencoder`) e o prefixo dos artifacts (`MODEL_NAME_PREFIX` do `trainer.py`). |
 
 A chave do wandb vem da variável `WANDB_API_KEY`, pelo próprio cliente do wandb. No `build.yml` ela vem apenas do secret `WANDB_API_KEY`.
 
 ## Comportamento
 
 1. `main` lê as opções, separa os tickers e cria a pasta de saída. A validação dos tickers acontece antes de qualquer chamada ao wandb.
-2. Para cada ticker, `download_latest_model` busca o artifact `<projeto>/simple-autoencoder-<ticker_slug>:<alias>` do tipo `model`. O alias padrão é `latest`, e o build passa o nome do experimento.
+2. `main` deriva o experimento (alias) e o prefixo do `--model`. Para cada ticker, `download_latest_model` busca o artifact `<projeto>/<prefixo><ticker_slug>:<experimento>` do tipo `model`.
 3. Antes do download, confere se os metadados do artifact têm as chaves de `REQUIRED_METADATA_KEYS`. Se faltar alguma, o script para com erro.
 4. O artifact é baixado para uma pasta temporária. O primeiro arquivo `*.pt` é copiado para `<output>/simple-autoencoder-<ticker_slug>.pt`.
 5. `build_report_data` monta o relatório com os valores do artifact e grava `<output>/simple-autoencoder-<ticker_slug>-overfitting.json`, em JSON com recuo de 2 espaços.

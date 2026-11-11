@@ -117,7 +117,9 @@ Há dois jeitos de carregar os modelos no serviço:
   pela variável `AUTOENCODER_MODEL_DIR`.
 - **wandb:** `wandb_autoencoder_registry.py` e `download_latest_models.py`
   baixam a versão de cada modelo registrado no wandb sob o alias do
-  experimento (`latest` por padrão).
+  experimento, que é derivado do pacote do modelo (`base_autoencoder` vira
+  `base-autoencoder`). O prefixo dos nomes dos artifacts vem da constante
+  `MODEL_NAME_PREFIX` do `trainer.py` de cada modelo.
 
 ### 2.6 Serving (`src/generative_models/serving/`)
 

@@ -7,15 +7,17 @@ module. The same command serves every model, so a model needs no copy of it.
 
 import argparse
 import importlib
-import re
 from functools import partial
 from pathlib import Path
 from types import ModuleType
 
+from generative_models.models.model_names import (
+    derive_experiment_name,
+    validate_model_name,
+)
 from generative_models.models.ticker_model_manager import TickerModelManager
 from generative_models.models.training_options import TrainingOptions
 
-MODEL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 DEFAULT_MODEL = "base_autoencoder"
 
 
@@ -41,26 +43,6 @@ def parse_ticker_list(raw_tickers: str) -> list[str]:
     tickers = [ticker.strip() for ticker in raw_tickers.split(",")]
 
     return [ticker for ticker in tickers if ticker]
-
-
-def validate_model_name(model_name: str) -> None:
-    """Check that a model name is a valid package name.
-
-    Parameters
-    ----------
-    model_name : str
-        Name of the model package, for example `"lstm_autoencoder"`.
-
-    Raises
-    ------
-    ValueError
-        If the name is not in `snake_case`, or contains path characters.
-    """
-    if not MODEL_NAME_PATTERN.match(model_name):
-        raise ValueError(
-            f"Invalid model name '{model_name}': use lowercase letters, "
-            "digits and underscores, starting with a letter."
-        )
 
 
 def load_model_module(model_name: str, module_name: str) -> ModuleType:
@@ -161,17 +143,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=defaults.device,
         help="Device for training, for example cpu or cuda.",
     )
-    parser.add_argument(
-        "--experiment-name",
-        type=str,
-        default=defaults.experiment_name,
-        help=(
-            "Experiment the models are registered under, used as the alias "
-            "of the models in wandb. Lowercase letters, digits and hyphens, "
-            "at most 40 characters, and not 'latest'."
-        ),
-    )
-
     return parser
 
 
@@ -196,7 +167,7 @@ def build_training_options(arguments: argparse.Namespace) -> TrainingOptions:
         window_size=arguments.window_size,
         output_directory=arguments.output_directory,
         device=arguments.device,
-        experiment_name=arguments.experiment_name,
+        experiment_name=derive_experiment_name(arguments.model),
     )
 
 
