@@ -23,12 +23,14 @@ from generative_models.models.convolutional_autoencoder.autoencoder import (
 )
 from generative_models.models.convolutional_autoencoder.config import (
     ConvolutionalAutoencoderTrainingConfig,
+    TrackingConfig,
 )
 from generative_models.tracking.wandb_tracker import (
     WandbExperimentTracker,
 )
 
 MODEL_NAME_PREFIX = "convolutional-autoencoder-"
+WANDB_PROJECT_NAME = TrackingConfig.project_name
 
 
 @dataclass
