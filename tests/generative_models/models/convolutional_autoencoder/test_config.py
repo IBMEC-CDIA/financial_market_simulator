@@ -26,6 +26,7 @@ EXPECTED_FLAT_KEYS = {
     "weight_decay",
     "early_stopping_patience",
     "project_name",
+    "experiment_name",
     "output_directory",
     "env_file_path",
     "contamination",
@@ -71,7 +72,7 @@ def test_default_regularization_is_enabled() -> None:
 
 
 def test_to_flat_dict_contains_exactly_the_expected_keys() -> None:
-    """Check that the flat dictionary has the 17 documented keys."""
+    """Check that the flat dictionary has the 18 documented keys."""
     flat_dictionary = (
         ConvolutionalAutoencoderTrainingConfig().to_flat_dict()
     )

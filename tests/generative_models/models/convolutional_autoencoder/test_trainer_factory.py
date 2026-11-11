@@ -79,6 +79,15 @@ def test_build_convolutional_config_maps_the_shared_options() -> None:
     assert config.device == "cpu"
 
 
+def test_build_convolutional_config_keeps_the_experiment_name() -> None:
+    """Check that the experiment of the options reaches the tracking."""
+    options = TrainingOptions(experiment_name="convolutional-autoencoder")
+
+    config = trainer_factory.build_convolutional_config(options)
+
+    assert config.tracking.experiment_name == "convolutional-autoencoder"
+
+
 def test_build_convolutional_config_without_options_is_default() -> None:
     """Check that no options give the default model configuration."""
     assert (

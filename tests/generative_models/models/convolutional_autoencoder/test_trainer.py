@@ -308,6 +308,21 @@ def test_train_reports_the_architecture_for_the_serving_fields(
 
 
 @patch(FETCH_PRICE_SERIES_PATH)
+def test_log_model_registers_the_experiment_alias(
+    mock_fetch_price_series, tmp_path
+) -> None:
+    """Check that the model is registered under the experiment alias."""
+    mock_fetch_price_series.return_value = _make_price_frame(101)
+    experiment_tracker = MagicMock()
+    trainer = _make_trainer(tmp_path, experiment_tracker)
+
+    trainer.train()
+
+    aliases = experiment_tracker.log_model.call_args.kwargs["aliases"]
+    assert aliases == [trainer.config.tracking.experiment_name]
+
+
+@patch(FETCH_PRICE_SERIES_PATH)
 def test_log_model_metadata_contains_training_summary(
     mock_fetch_price_series, tmp_path
 ) -> None:

@@ -619,6 +619,7 @@ class ConvolutionalAutoencoderTrainer:
                     "best_epoch": fit_outcome.best_epoch,
                     "stopped_at_epoch": fit_outcome.stopped_at_epoch,
                 },
+                aliases=[self.config.tracking.experiment_name],
             )
         finally:
             self.experiment_tracker.finish_run()

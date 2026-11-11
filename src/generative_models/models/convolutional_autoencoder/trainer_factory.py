@@ -55,6 +55,7 @@ def build_convolutional_config(
         ),
         tracking=TrackingConfig(
             output_directory=options.output_directory,
+            experiment_name=options.experiment_name,
         ),
         device=options.device,
     )

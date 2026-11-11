@@ -4,6 +4,10 @@
 
 from dataclasses import dataclass, field
 
+from generative_models.models.base_autoencoder.config import (
+    validate_experiment_name,
+)
+
 
 @dataclass
 class MarketDataConfig:
@@ -99,11 +103,19 @@ class TrackingConfig:
         Directory where the trained model weights are saved.
     env_file_path : str
         Path to the `.env` file that contains `WANDB_API_KEY`.
+    experiment_name : str
+        Experiment the model is registered under, used as the wandb alias
+        of the model. It must be a valid experiment name.
     """
 
     project_name: str = "autoencoder-convolutional-outlier-trading-agent"
     output_directory: str = "artifacts"
     env_file_path: str = ".env"
+    experiment_name: str = "default"
+
+    def __post_init__(self) -> None:
+        """Validate the experiment name."""
+        validate_experiment_name(self.experiment_name)
 
 
 @dataclass
@@ -218,6 +230,7 @@ class ConvolutionalAutoencoderTrainingConfig:
                 self.optimization.early_stopping_patience
             ),
             "project_name": self.tracking.project_name,
+            "experiment_name": self.tracking.experiment_name,
             "output_directory": self.tracking.output_directory,
             "env_file_path": self.tracking.env_file_path,
             "contamination": self.contamination,
