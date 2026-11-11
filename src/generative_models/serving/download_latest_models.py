@@ -15,7 +15,6 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from generative_models.models.base_autoencoder.config import TrackingConfig
 from generative_models.models.base_autoencoder.trainer import (
     MODEL_NAME_PREFIX,
     build_ticker_slug,
@@ -23,6 +22,7 @@ from generative_models.models.base_autoencoder.trainer import (
 from generative_models.models.model_names import (
     derive_experiment_name,
     load_artifact_prefix,
+    load_project_name,
 )
 from generative_models.serving.wandb_autoencoder_registry import (
     REQUIRED_METADATA_KEYS,
@@ -41,7 +41,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     -------
     argparse.ArgumentParser
         Parser with the options `--tickers`, `--model`,
-        `--output-directory`, `--project-name` and `--entity`.
+        `--output-directory` and `--entity`.
 
     Example
     -------
@@ -65,12 +65,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=str,
         default=DEFAULT_OUTPUT_DIRECTORY,
         help="Directory where the weights and reports are written.",
-    )
-    parser.add_argument(
-        "--project-name",
-        type=str,
-        default=TrackingConfig.project_name,
-        help="Name of the wandb project that holds the models.",
     )
     parser.add_argument(
         "--entity",
@@ -320,10 +314,11 @@ def main(
     tickers = parse_ticker_list(arguments.tickers)
     experiment_name = derive_experiment_name(arguments.model)
     name_prefix = load_artifact_prefix(arguments.model)
+    project_name = load_project_name(arguments.model)
     output_directory = Path(arguments.output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
     registry = WandbAutoencoderRegistry(
-        project_name=arguments.project_name,
+        project_name=project_name,
         entity=arguments.entity,
     )
 

@@ -20,12 +20,14 @@ from generative_models.models.base_autoencoder.autoencoder import (
 )
 from generative_models.models.base_autoencoder.config import (
     AutoencoderTrainingConfig,
+    TrackingConfig,
 )
 from generative_models.tracking.wandb_tracker import (
     WandbExperimentTracker,
 )
 
 MODEL_NAME_PREFIX = "simple-autoencoder-"
+WANDB_PROJECT_NAME = TrackingConfig.project_name
 
 
 @dataclass

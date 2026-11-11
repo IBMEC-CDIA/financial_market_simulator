@@ -606,8 +606,10 @@ To build without a Train run, leave `train_run_id` empty and fill in `tickers`
 the same model the Train run used). The job then runs
 `generative_models.serving.download_latest_models --model <model>`, which
 writes the model of each ticker from wandb into `models/` before the image is
-built. The experiment and the artifact name prefix are derived from the model,
-so they are not inputs: the experiment is the package name with hyphens
+built. The wandb project, the experiment and the artifact name prefix are
+derived from the model, so they are not inputs. The project is the
+`WANDB_PROJECT_NAME` of the model's `trainer.py`, the experiment is the package
+name with hyphens
 (`convolutional-autoencoder`), and the prefix is the `MODEL_NAME_PREFIX` of the
 model's `trainer.py` (`simple-autoencoder-` for `base_autoencoder`,
 `convolutional-autoencoder-` for `convolutional_autoencoder`). A ticker
