@@ -37,6 +37,183 @@ they have not been validated for trading.
 The project is used in a course, so it favors clear code, documented specs
 and reproducible workflows over performance.
 
+## Diagrams
+
+The diagrams below are written in [Mermaid](https://mermaid.js.org/), which
+GitHub renders directly in this file. They follow the code of the `main`
+branch.
+
+### How the project fits together
+
+```mermaid
+flowchart LR
+    Yahoo[(Yahoo Finance prices)] --> Train[Train workflow]
+    Train --> Wandb[(Weights and Biases)]
+    Train --> Artifact[(trained-models artifact)]
+    Artifact --> Build[Build workflow]
+    Build --> Hub[(Docker Hub image)]
+    Hub --> Deploy[Deploy workflow]
+    Deploy --> Azure[Azure container instance]
+    Client[Client] --> Azure
+    Local[models/ folder] -.-> Azure
+```
+
+### CI pipeline (`ci.yml`)
+
+Runs on every push and pull request. Each job waits for the jobs it needs.
+
+```mermaid
+flowchart LR
+    structure["structure: files and layout"] --> lint["lint: pylint"]
+    lint --> unit["unit-test: pytest"]
+    lint --> security["security: bandit and pip-audit"]
+    structure --> report["test-report"]
+    lint --> report
+    unit --> report
+    security --> report
+    report --> success["pipeline-success"]
+```
+
+### Build pipeline (`build.yml`)
+
+Started by hand. It only runs after the CI passed for the same commit.
+
+```mermaid
+flowchart LR
+    ciCheck["ci-check: CI passed for this commit"] --> buildImage["build-image: Docker image and scan"]
+    buildImage --> pushImage["push-image: Docker Hub"]
+    ciCheck --> pushImage
+    pushImage --> success["pipeline-success"]
+```
+
+### Train pipeline (`train.yml`)
+
+Started by hand. It trains the models, evaluates the overfitting and stores
+the trained models as an artifact.
+
+```mermaid
+flowchart LR
+    ciCheck["ci-check: CI passed for this commit"] --> plan["plan: check tickers and wandb key"]
+    plan --> e2e["test-end-to-end"]
+    plan --> collect["collect-data: market data"]
+    e2e --> collect
+    plan --> train["train-autoencoder"]
+    collect --> train
+    plan --> evaluate["evaluate: overfitting"]
+    train --> evaluate
+    evaluate --> success["pipeline-success"]
+```
+
+### Deploy pipeline (`deploy.yml`)
+
+Started by hand. It replaces the Azure container instance so that it runs an
+image from Docker Hub.
+
+```mermaid
+flowchart LR
+    validate["validate-inputs: image and container name"] --> deploy["deploy: replace the Azure container"]
+    deploy --> success["pipeline-success"]
+```
+
+### Classes of the main package
+
+Main classes of `src/generative_models` and how they depend on each other.
+Only the public methods are shown.
+
+```mermaid
+classDiagram
+    class ModelRegistry {
+        <<abstract>>
+        +load_model(ticker)
+        +load_all_models()
+        +get_model(ticker)
+        +list_loaded_tickers()
+    }
+    class WandbAutoencoderRegistry
+    class LocalAutoencoderRegistry
+    class AutoencoderModelService {
+        +get_instance()
+        +preload_all()
+        +get_predictor(ticker)
+        +reload()
+        +list_loaded_models()
+    }
+    class AutoencoderPredictor {
+        +predict()
+        +predict_from_prices()
+    }
+    class AutoencoderModelMetadata
+    class SimpleAutoencoder
+    class AutoencoderTrainer {
+        +prepare_data()
+        +build_model()
+        +train()
+    }
+    class AutoencoderTrainingConfig
+    class SlidingWindowReconstructionDataset
+    class WandbExperimentTracker {
+        +start_run()
+        +log_metrics()
+        +log_model()
+        +finish_run()
+    }
+    class OverfittingReport
+    class TickerModelManager
+
+    ModelRegistry <|-- WandbAutoencoderRegistry
+    ModelRegistry <|-- LocalAutoencoderRegistry
+    AutoencoderModelService --> ModelRegistry : loads models with
+    AutoencoderModelService o-- AutoencoderPredictor : keeps one per ticker
+    WandbAutoencoderRegistry ..> AutoencoderPredictor : builds
+    LocalAutoencoderRegistry ..> AutoencoderPredictor : builds
+    AutoencoderPredictor --> SimpleAutoencoder : runs
+    AutoencoderPredictor --> AutoencoderModelMetadata
+    TickerModelManager --> AutoencoderTrainer : trains with
+    AutoencoderTrainer --> AutoencoderTrainingConfig : configured by
+    AutoencoderTrainer --> SimpleAutoencoder : trains
+    AutoencoderTrainer --> SlidingWindowReconstructionDataset : builds
+    AutoencoderTrainer --> WandbExperimentTracker : logs with
+    AutoencoderTrainer ..> OverfittingReport : produces
+```
+
+### Training flow
+
+What happens when a model is trained from the command line.
+
+```mermaid
+flowchart TD
+    CLI["run_train_script or run_model_training"] --> Factory["build_trainer (trainer_factory)"]
+    Factory --> Trainer["AutoencoderTrainer.train"]
+    Trainer --> Prices["fetch_price_series (yfinance)"]
+    Prices --> Norm["normalize_series"]
+    Norm --> Data["SlidingWindowReconstructionDataset"]
+    Data --> Fit["training loop of SimpleAutoencoder"]
+    Fit --> Track["WandbExperimentTracker: log_metrics and log_model"]
+    Fit --> Report["OverfittingReport"]
+    Report --> Files["models/*.pt and *-overfitting.json"]
+```
+
+### Prediction flow
+
+When a client asks for the signal history of a ticker, the request goes through the API, the model service and the predictor. The
+models are loaded once, when the API starts (`preload_all`). A request
+then uses the predictor kept in memory for its ticker.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API
+    participant Service
+    participant Predictor
+    Client->>API: GET signals history for a ticker
+    API->>Service: get predictor for the ticker
+    Service-->>API: predictor kept in memory
+    API->>Predictor: predict from the prices of the period
+    Predictor-->>API: reconstruction scores per window
+    API-->>Client: one suggestion per day as JSON
+```
+
+
 ## Project structure
 
 ```
@@ -97,43 +274,110 @@ financial_market_simulator/
 
 ## Getting started
 
-### Prerequisites
+This guide starts from a machine without anything installed except Git. The
+project uses [uv](https://docs.astral.sh/uv/) to manage Python and the
+dependencies: uv installs the Python version and the packages from
+`pyproject.toml` and `uv.lock`, the same way the CI does.
 
-- [uv](https://docs.astral.sh/uv/) installed
-- Python 3.12.10 (uv can install it automatically)
+### 1. Install uv
 
-### Environment setup
+On Windows (PowerShell):
 
-Create the virtual environment with the pinned Python version:
-
-```bash
-uv venv --python 3.12.10
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-Install the full development environment (includes PyTorch with CUDA
-support, TensorFlow, Jupyter, Weights & Biases, and other tooling used
-locally):
+On macOS or Linux:
 
 ```bash
-uv pip install -r requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Copy the environment variable template and fill in the required
-values:
+Close and open the terminal, then check it:
+
+```bash
+uv --version
+```
+
+You do not need to install Python yourself: uv downloads the Python version
+the project uses (below).
+
+### 2. Get the code
+
+```bash
+git clone https://github.com/IBMEC-CDIA/financial_market_simulator.git
+cd financial_market_simulator
+```
+
+### 3. Install Python and the dependencies
+
+Install the Python version used by the project and create the virtual
+environment with every dependency needed for tests, linting and the API:
+
+```bash
+uv python install 3.12.10
+uv sync --extra dev --python 3.12.10
+```
+
+This creates the `.venv` folder inside the project. You do not need to
+activate it: run commands with `uv run`, as shown below.
+
+On Windows, `uv sync` installs PyTorch with CUDA support (the
+`pytorch-cu121` index in `pyproject.toml`). On macOS and Linux it installs
+the default PyTorch build.
+
+### 4. Configure the environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-### Running the tests
+Open `.env` and set `WANDB_API_KEY` with your Weights & Biases key. The key
+is needed to train models and to download them from wandb. The tests and the
+API with local model files do not need it. Never commit `.env`.
 
-The lightweight dependencies needed to run the test suite (NumPy,
-PyTorch and pytest) are declared in `pyproject.toml`:
+### 5. Check the installation
+
+Run the tests and the linter, the same checks the CI runs:
 
 ```bash
-uv sync --extra dev
 uv run pytest
+uv run pylint src/generative_models tests
 ```
+
+### 6. Run the API locally
+
+The API serves the model files in `models/`. Each model is a `.pt` file with
+its `*-overfitting.json` report. Get them from a successful Train run (see
+the Serving section), or from the wandb artifacts of the project, and copy
+them into `models/`. Then start the API:
+
+```bash
+uv run uvicorn generative_models.serving.api:app --port 8000
+```
+
+Open `http://127.0.0.1:8000/docs` for the interactive API docs, or
+`http://127.0.0.1:8000/health` to check that the models were loaded.
+
+### 7. Run the notebooks (optional)
+
+The notebooks in `notebooks/` use four packages that are not part of
+`pyproject.toml` yet: `pgl-utils`, `torchinfo`, `plotly` and `jupyter`.
+Install them into the project environment, then start Jupyter:
+
+```bash
+uv pip install pgl-utils torchinfo plotly jupyter
+uv run jupyter lab
+```
+
+### About `requirements.txt`
+
+`requirements.txt` is not used by the CI and does not describe the complete
+environment. It does not include `python-dotenv` (used at runtime to read
+`.env`), `pytest`, `pylint`, `great-expectations` or `httpx` (used by the
+tests), and it pins a PyTorch build (`2.5.1+cu121`) that is only published
+for Windows and Linux. Use the steps above (`uv sync`) instead of
+`pip install -r requirements.txt`.
 
 ### Specs for students
 
@@ -301,7 +545,7 @@ The CI workflow has these jobs:
   Docker and never tracked, and the layout of the model packages.
 - `lint` runs pylint on `src/generative_models` and `tests`.
 - `unit-test` runs pytest with coverage. It fails when the coverage of
-  `src/generative_models` is below 90%, and uploads the JUnit and coverage
+  `src/generative_models` is below 60%, and uploads the JUnit and coverage
   reports as the `unit-test-reports` artifact.
 - `security` audits the runtime dependencies locked in `uv.lock` with
   `pip-audit`, scans the source code with Bandit at medium severity and
@@ -332,11 +576,6 @@ the workflow always uses the `WANDB_API_KEY` repository secret. Its inputs are:
   and `overfitting.py`, so a placeholder package is refused.
 - `tickers`: comma-separated ticker symbols, for example `AAPL,MSFT,PETR4.SA`.
   The jobs run once per ticker.
-- `experiment`: the name the models are registered under in wandb, for example
-  `aapl-baseline` (default `default`). The build picks the models of an
-  experiment by this name, so runs with different settings do not get mixed.
-  Use lowercase letters, digits and hyphens, at most 40 characters, not
-  `latest`.
 - `epochs`, `learning_rate` and `window_size`: training hyperparameters.
 
 It runs these jobs in order:
@@ -363,13 +602,17 @@ downloads the trained models, builds the
 Docker image, smoke tests it and scans it with Trivy.
 
 To build without a Train run, leave `train_run_id` empty and fill in `tickers`
-(for example `PETR4.SA,AAPL`) and `experiment` (for example `aapl-baseline`).
-The job then runs `generative_models.serving.download_latest_models` with
-`--alias <experiment>`, which writes the model of each ticker registered under
-that experiment from wandb into `models/` before the image is built. A ticker
+(for example `PETR4.SA,AAPL`) and `model` (for example `convolutional_autoencoder`,
+the same model the Train run used). The job then runs
+`generative_models.serving.download_latest_models --model <model>`, which
+writes the model of each ticker from wandb into `models/` before the image is
+built. The experiment and the artifact name prefix are derived from the model,
+so they are not inputs: the experiment is the package name with hyphens
+(`convolutional-autoencoder`), and the prefix is the `MODEL_NAME_PREFIX` of the
+model's `trainer.py` (`simple-autoencoder-` for `base_autoencoder`,
+`convolutional-autoencoder-` for `convolutional_autoencoder`). A ticker
 without a model under that experiment fails the job before the build starts.
-The `latest` alias is not accepted as an experiment. The
-report written this way has `test_loss` and `baseline_test_loss` set to `null`,
+The report written this way has `test_loss` and `baseline_test_loss` set to `null`,
 because the wandb artifact does not store them. It fails on fixable
 `CRITICAL` or `HIGH` vulnerabilities. Then the `push-image` job logs in to
 Docker Hub and pushes the image with three tags: the tickers tag, the commit
@@ -380,10 +623,8 @@ ticker of every `*-overfitting.json` in `models/`, lowercases them, sorts them
 and joins them with `-`. For models of `AAPL` and `MSFT` the image is
 `financial-market-simulator:aapl-msft`. The tag is limited to 120 characters.
 
-The Docker Hub account and token are taken from the `dockerhub_username` and
-`dockerhub_token` inputs of the dispatch. Leave them empty to use the
-`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets. For example:
-`gh workflow run build.yml -f dockerhub_username=... -f dockerhub_token=...`.
+The Docker Hub account and token come only from the `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN` repository secrets. The build has no inputs for them.
 
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.
