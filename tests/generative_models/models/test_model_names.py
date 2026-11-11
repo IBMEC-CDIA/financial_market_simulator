@@ -8,6 +8,7 @@ from generative_models.models import model_names
 from generative_models.models.model_names import (
     derive_experiment_name,
     load_artifact_prefix,
+    load_project_name,
     validate_model_name,
 )
 
@@ -64,3 +65,26 @@ def test_load_artifact_prefix_refuses_a_trainer_without_prefix(
 
     with pytest.raises(ValueError, match="MODEL_NAME_PREFIX"):
         load_artifact_prefix("fake_model")
+
+
+def test_load_project_name_reads_the_trainer_constant() -> None:
+    """Check that the base model keeps its own wandb project."""
+    assert (
+        load_project_name("base_autoencoder")
+        == "autoencoder-simple-outlier-trading-agent"
+    )
+
+
+def test_load_project_name_refuses_a_trainer_without_project(
+    monkeypatch,
+) -> None:
+    """Check that a trainer without a wandb project is refused."""
+    fake_trainer = types.ModuleType("fake_trainer")
+    monkeypatch.setattr(
+        model_names.importlib,
+        "import_module",
+        lambda module_path: fake_trainer,
+    )
+
+    with pytest.raises(ValueError, match="WANDB_PROJECT_NAME"):
+        load_project_name("fake_model")
