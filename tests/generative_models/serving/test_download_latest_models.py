@@ -86,6 +86,14 @@ def test_build_model_name_uses_the_trainer_slug() -> None:
     assert build_model_name("PETR4.SA") == "simple-autoencoder-petr4.sa"
 
 
+def test_build_model_name_accepts_the_convolutional_prefix() -> None:
+    """Check that the prefix of the convolutional model family is used."""
+    assert (
+        build_model_name("NVDA", "convolutional-autoencoder-")
+        == "convolutional-autoencoder-nvda"
+    )
+
+
 def test_build_argument_parser_defaults_to_the_models_directory() -> None:
     """Check the default output directory of the script."""
     arguments = build_argument_parser().parse_args(["--tickers", "AAPL"])
@@ -93,6 +101,7 @@ def test_build_argument_parser_defaults_to_the_models_directory() -> None:
     assert arguments.output_directory == "models"
     assert arguments.entity is None
     assert arguments.alias == "latest"
+    assert arguments.name_prefix == "simple-autoencoder-"
 
 
 def test_build_report_data_computes_the_overfitting_ratio() -> None:
@@ -182,6 +191,63 @@ def test_main_downloads_every_ticker(tmp_path, monkeypatch, capsys) -> None:
     assert all(path.exists() for path in report_paths)
     assert "Downloaded the latest model of AAPL" in capsys.readouterr().out
     assert json.loads(report_paths[0].read_text(encoding="utf-8"))["ticker"]
+
+
+def test_download_uses_the_name_prefix_of_the_model_family(tmp_path) -> None:
+    """Check that the artifact of the given model family is requested."""
+    artifact = _build_fake_artifact(_metadata(), ["weights.pt"])
+    registry = _registry_with(artifact)
+
+    report_path = download_latest_model(
+        registry,
+        "NVDA",
+        tmp_path,
+        alias="default",
+        name_prefix="convolutional-autoencoder-",
+    )
+
+    registry.api.artifact.assert_called_once_with(
+        f"{PROJECT_PATH}/convolutional-autoencoder-nvda:default",
+        type="model",
+    )
+    assert (tmp_path / "convolutional-autoencoder-nvda.pt").exists()
+    assert report_path == (
+        tmp_path / "convolutional-autoencoder-nvda-overfitting.json"
+    )
+
+
+def test_main_passes_the_name_prefix_to_every_download(
+    tmp_path, monkeypatch
+) -> None:
+    """Check that the --name-prefix option is used for each ticker."""
+    artifact = _build_fake_artifact(_metadata(), ["weights.pt"])
+    registry = _registry_with(artifact)
+    monkeypatch.setattr(
+        download_latest_models,
+        "WandbAutoencoderRegistry",
+        MagicMock(return_value=registry),
+    )
+
+    main(
+        [
+            "--tickers",
+            "NVDA,AMD",
+            "--output-directory",
+            str(tmp_path / "models"),
+            "--alias",
+            "default",
+            "--name-prefix",
+            "convolutional-autoencoder-",
+        ]
+    )
+
+    requested_paths = [
+        call.args[0] for call in registry.api.artifact.call_args_list
+    ]
+    assert requested_paths == [
+        f"{PROJECT_PATH}/convolutional-autoencoder-nvda:default",
+        f"{PROJECT_PATH}/convolutional-autoencoder-amd:default",
+    ]
 
 
 def test_download_model_of_an_experiment_uses_its_alias(tmp_path) -> None:

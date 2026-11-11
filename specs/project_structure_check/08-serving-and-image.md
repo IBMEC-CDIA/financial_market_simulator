@@ -49,8 +49,9 @@ ignorado.
    - com `train_run_id` informado, baixa o artifact `trained-models` desse
      run do `train.yml`;
    - sem `train_run_id`, baixa a versão com o alias do input `experiment`
-     do artifact `simple-autoencoder-<ticker>` de cada ticker do input
-     `tickers`, pelo
+     do artifact `<name_prefix><ticker>` de cada ticker do input
+     `tickers` (o input `name_prefix` vale `simple-autoencoder-` por
+     padrão e `convolutional-autoencoder-` para o modelo convolucional), pelo
      módulo `generative_models.serving.download_latest_models`. Esse modo
      precisa da chave do wandb (secret `WANDB_API_KEY`). O módulo grava `<nome>.pt` e
      `<nome>-overfitting.json`, que o registro local lê. Os campos

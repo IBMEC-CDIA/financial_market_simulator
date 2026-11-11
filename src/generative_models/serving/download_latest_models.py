@@ -83,6 +83,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "model of each ticker."
         ),
     )
+    parser.add_argument(
+        "--name-prefix",
+        type=str,
+        default=MODEL_NAME_PREFIX,
+        help=(
+            "Prefix of the artifact names of the model family, for example "
+            "convolutional-autoencoder-. Must match the trained model."
+        ),
+    )
 
     return parser
 
@@ -120,26 +129,34 @@ def parse_ticker_list(ticker_text: str) -> list[str]:
     return tickers
 
 
-def build_model_name(ticker: str) -> str:
+def build_model_name(
+    ticker: str,
+    name_prefix: str = MODEL_NAME_PREFIX,
+) -> str:
     """Return the artifact and file name of the model of a ticker.
 
     Parameters
     ----------
     ticker : str
         Ticker symbol, for example `"PETR4.SA"`.
+    name_prefix : str
+        Prefix of the model family, for example `"simple-autoencoder-"`
+        or `"convolutional-autoencoder-"`. It must match the prefix used
+        by the trainer of that model.
 
     Returns
     -------
     str
-        Name in the form `simple-autoencoder-<ticker_slug>`, the same as
-        the one used by the trainer when it logs the model.
+        Name in the form `<name_prefix><ticker_slug>`.
 
     Example
     -------
     >>> build_model_name("PETR4.SA")
     'simple-autoencoder-petr4.sa'
+    >>> build_model_name("PETR4.SA", "convolutional-autoencoder-")
+    'convolutional-autoencoder-petr4.sa'
     """
-    return MODEL_NAME_PREFIX + build_ticker_slug(ticker)
+    return name_prefix + build_ticker_slug(ticker)
 
 
 def build_report_data(
@@ -200,6 +217,7 @@ def download_latest_model(
     ticker: str,
     output_directory: Path,
     alias: str = DEFAULT_ALIAS,
+    name_prefix: str = MODEL_NAME_PREFIX,
 ) -> Path:
     """Download the model of a ticker with an alias and write its files.
 
@@ -215,6 +233,10 @@ def download_latest_model(
     alias : str
         Alias of the model version to download, `"latest"` by default.
         An experiment name selects the models registered under it.
+    name_prefix : str
+        Prefix of the artifact name of the model family, for example
+        `"convolutional-autoencoder-"`. Defaults to the simple
+        autoencoder prefix.
 
     Returns
     -------
@@ -237,7 +259,7 @@ def download_latest_model(
     ...     alias="aapl-baseline",
     ... )
     """
-    model_name = build_model_name(ticker)
+    model_name = build_model_name(ticker, name_prefix)
     artifact_path = f"{registry.project_path}/{model_name}:{alias}"
     artifact = registry.api.artifact(artifact_path, type="model")
 
@@ -314,6 +336,7 @@ def main(
             ticker,
             output_directory,
             alias=arguments.alias,
+            name_prefix=arguments.name_prefix,
         )
         print(f"Downloaded the latest model of {ticker}: {report_path}")
         report_paths.append(report_path)

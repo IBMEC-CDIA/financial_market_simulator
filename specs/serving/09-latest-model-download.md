@@ -69,6 +69,8 @@ uv run python -m generative_models.serving.download_latest_models \
 | `--output-directory` | não | `models` | Pasta onde os arquivos são gravados. É criada se não existir. |
 | `--project-name` | não | `TrackingConfig.project_name` | Projeto do wandb onde estão os modelos. |
 | `--entity` | não | conta padrão do wandb | Usuário ou time do wandb. |
+| `--alias` | não | `latest` | Alias da versão (o nome do experimento, ou `latest`). |
+| `--name-prefix` | não | `simple-autoencoder-` | Prefixo dos nomes dos artifacts da família do modelo, por exemplo `convolutional-autoencoder-`. Deve ser o mesmo prefixo que o treino registrou. |
 
 A chave do wandb vem da variável `WANDB_API_KEY`, pelo próprio cliente do wandb. No `build.yml` ela vem apenas do secret `WANDB_API_KEY`.
 

@@ -609,7 +609,9 @@ Docker image, smoke tests it and scans it with Trivy.
 To build without a Train run, leave `train_run_id` empty and fill in `tickers`
 (for example `PETR4.SA,AAPL`) and `experiment` (for example `aapl-baseline`).
 The job then runs `generative_models.serving.download_latest_models` with
-`--alias <experiment>`, which writes the model of each ticker registered under
+`--alias <experiment>` and `--name-prefix <name_prefix>` (default
+`simple-autoencoder-`; use `convolutional-autoencoder-` for the convolutional
+model), which writes the model of each ticker registered under
 that experiment from wandb into `models/` before the image is built. A ticker
 without a model under that experiment fails the job before the build starts.
 The `latest` alias is not accepted as an experiment. The
