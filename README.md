@@ -47,12 +47,12 @@ branch.
 
 ```mermaid
 flowchart LR
-    Yahoo[(Yahoo Finance prices)] --> Train[Train workflow]
+    Yahoo[(Yahoo Finance prices)] --> Train[02 - Train Model]
     Train --> Wandb[(Weights and Biases)]
     Train --> Artifact[(trained-models artifact)]
-    Artifact --> Build[Build workflow]
+    Artifact --> Build[03 - Build API]
     Build --> Hub[(Docker Hub image)]
-    Hub --> Deploy[Deploy workflow]
+    Hub --> Deploy[04 - Deploy API]
     Deploy --> Azure[Azure container instance]
     Client[Client] --> Azure
     Local[models/ folder] -.-> Azure
@@ -539,7 +539,7 @@ Four workflows in `.github/workflows/` run the project:
 | Build | `build.yml` | By hand | Builds and tests the Docker image, then pushes it to Docker Hub. |
 | Deploy | `deploy.yml` | By hand | Replaces the Azure container instance with an image from Docker Hub. |
 
-The CI workflow has these jobs:
+The CI workflow (`01 - Continuous Integration`) has these jobs:
 
 - `structure` checks the required files, that `.env` is ignored by git and
   Docker and never tracked, and the layout of the model packages.
@@ -564,7 +564,7 @@ neither network access nor a wandb key:
 uv run pytest tests/end_to_end
 ```
 
-### Training workflow (`train.yml`)
+### Training workflow (`train.yml`, shown as `02 - Train Model`)
 
 The training workflow is started by hand from the Actions tab (Run workflow),
 or from the command line with
@@ -594,7 +594,7 @@ It runs these jobs in order:
    report in that artifact.
 7. `pipeline-success` fails unless every job above succeeded.
 
-### Build workflow (`build.yml`)
+### Build workflow (`build.yml`, shown as `03 - Build API`)
 
 The build workflow is also started by hand, with Run workflow. It waits for the
 CI run of the same commit to finish, fails unless that run passed, then
@@ -629,7 +629,7 @@ The Docker Hub account and token come only from the `DOCKERHUB_USERNAME` and
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.
 
-### Deploy workflow (`deploy.yml`)
+### Deploy workflow (`deploy.yml`, shown as `04 - Deploy API`)
 
 The deploy workflow is started by hand, with Run workflow. It replaces an Azure
 container instance so that it runs an image from Docker Hub. The only input is
