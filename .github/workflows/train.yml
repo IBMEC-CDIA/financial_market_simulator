@@ -145,7 +145,7 @@ jobs:
 
   test-end-to-end:
     name: End-to-end tests
-    needs: plan
+    needs: ci-check
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
