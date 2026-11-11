@@ -96,12 +96,19 @@ def test_build_model_name_accepts_the_convolutional_prefix() -> None:
 
 def test_build_argument_parser_defaults_to_the_models_directory() -> None:
     """Check the default output directory of the script."""
-    arguments = build_argument_parser().parse_args(["--tickers", "AAPL"])
+    arguments = build_argument_parser().parse_args(
+        ["--tickers", "AAPL", "--model", "base_autoencoder"]
+    )
 
     assert arguments.output_directory == "models"
     assert arguments.entity is None
-    assert arguments.alias == "latest"
-    assert arguments.name_prefix == "simple-autoencoder-"
+    assert arguments.model == "base_autoencoder"
+
+
+def test_build_argument_parser_requires_the_model() -> None:
+    """Check that the model is needed to know the artifacts to download."""
+    with pytest.raises(SystemExit):
+        build_argument_parser().parse_args(["--tickers", "AAPL"])
 
 
 def test_build_report_data_computes_the_overfitting_ratio() -> None:
@@ -182,6 +189,8 @@ def test_main_downloads_every_ticker(tmp_path, monkeypatch, capsys) -> None:
         [
             "--tickers",
             "AAPL,MSFT",
+            "--model",
+            "base_autoencoder",
             "--output-directory",
             str(output_directory),
         ]
@@ -216,40 +225,6 @@ def test_download_uses_the_name_prefix_of_the_model_family(tmp_path) -> None:
     )
 
 
-def test_main_passes_the_name_prefix_to_every_download(
-    tmp_path, monkeypatch
-) -> None:
-    """Check that the --name-prefix option is used for each ticker."""
-    artifact = _build_fake_artifact(_metadata(), ["weights.pt"])
-    registry = _registry_with(artifact)
-    monkeypatch.setattr(
-        download_latest_models,
-        "WandbAutoencoderRegistry",
-        MagicMock(return_value=registry),
-    )
-
-    main(
-        [
-            "--tickers",
-            "NVDA,AMD",
-            "--output-directory",
-            str(tmp_path / "models"),
-            "--alias",
-            "default",
-            "--name-prefix",
-            "convolutional-autoencoder-",
-        ]
-    )
-
-    requested_paths = [
-        call.args[0] for call in registry.api.artifact.call_args_list
-    ]
-    assert requested_paths == [
-        f"{PROJECT_PATH}/convolutional-autoencoder-nvda:default",
-        f"{PROJECT_PATH}/convolutional-autoencoder-amd:default",
-    ]
-
-
 def test_download_model_of_an_experiment_uses_its_alias(tmp_path) -> None:
     """Check that the alias of the experiment selects the artifact version."""
     artifact = _build_fake_artifact(_metadata(), ["weights.pt"])
@@ -268,10 +243,10 @@ def test_download_model_of_an_experiment_uses_its_alias(tmp_path) -> None:
     )
 
 
-def test_main_passes_the_alias_to_every_download(
+def test_main_derives_the_experiment_and_prefix_from_the_model(
     tmp_path, monkeypatch
 ) -> None:
-    """Check that the --alias option is used for each ticker."""
+    """Check the artifacts requested for each ticker of the model."""
     artifact = _build_fake_artifact(_metadata(), ["weights.pt"])
     registry = _registry_with(artifact)
     monkeypatch.setattr(
@@ -284,10 +259,10 @@ def test_main_passes_the_alias_to_every_download(
         [
             "--tickers",
             "AAPL,MSFT",
+            "--model",
+            "base_autoencoder",
             "--output-directory",
             str(tmp_path / "models"),
-            "--alias",
-            "aapl-baseline",
         ]
     )
 
@@ -295,6 +270,6 @@ def test_main_passes_the_alias_to_every_download(
         call.args[0] for call in registry.api.artifact.call_args_list
     ]
     assert requested_paths == [
-        f"{PROJECT_PATH}/simple-autoencoder-aapl:aapl-baseline",
-        f"{PROJECT_PATH}/simple-autoencoder-msft:aapl-baseline",
+        f"{PROJECT_PATH}/simple-autoencoder-aapl:base-autoencoder",
+        f"{PROJECT_PATH}/simple-autoencoder-msft:base-autoencoder",
     ]

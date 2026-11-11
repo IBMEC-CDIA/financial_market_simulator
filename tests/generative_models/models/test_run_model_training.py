@@ -145,6 +145,7 @@ def test_main_passes_the_options_to_the_trainer_factory(
     assert trainer_factory.keywords["options"] == TrainingOptions(
         epochs=7,
         output_directory=str(tmp_path),
+        experiment_name="base-autoencoder",
     )
     tickers_configuration = mock_manager_class.call_args.kwargs["tickers"]
     assert tickers_configuration["AAPL"]["start_date"] == "2020-01-01"
@@ -168,21 +169,20 @@ def test_main_rejects_an_invalid_model_before_training(tmp_path) -> None:
     mock_manager_class.assert_not_called()
 
 
-def test_experiment_name_defaults_to_default() -> None:
-    """Check that the training options start in the default experiment."""
-    arguments = build_argument_parser().parse_args(["--tickers", "AAPL"])
-
-    options = build_training_options(arguments)
-
-    assert options.experiment_name == "default"
-
-
-def test_experiment_name_option_reaches_the_training_options() -> None:
-    """Check that --experiment-name is passed to the training options."""
+def test_experiment_name_is_derived_from_the_model() -> None:
+    """Check that the experiment is the model package name with hyphens."""
     arguments = build_argument_parser().parse_args(
-        ["--tickers", "AAPL", "--experiment-name", "aapl-baseline"]
+        ["--model", "convolutional_autoencoder", "--tickers", "AAPL"]
     )
 
     options = build_training_options(arguments)
 
-    assert options.experiment_name == "aapl-baseline"
+    assert options.experiment_name == "convolutional-autoencoder"
+
+
+def test_experiment_name_option_is_no_longer_accepted() -> None:
+    """Check that the experiment is not a separate option of the command."""
+    with pytest.raises(SystemExit):
+        build_argument_parser().parse_args(
+            ["--tickers", "AAPL", "--experiment-name", "aapl-baseline"]
+        )

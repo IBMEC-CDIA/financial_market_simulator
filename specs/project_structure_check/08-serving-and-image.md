@@ -48,10 +48,10 @@ ignorado.
 2. O job `build-image` preenche a pasta `models/` de uma destas formas:
    - com `train_run_id` informado, baixa o artifact `trained-models` desse
      run do `train.yml`;
-   - sem `train_run_id`, baixa a versão com o alias do input `experiment`
-     do artifact `<name_prefix><ticker>` de cada ticker do input
-     `tickers` (o input `name_prefix` vale `simple-autoencoder-` por
-     padrão e `convolutional-autoencoder-` para o modelo convolucional), pelo
+   - sem `train_run_id`, baixa a versão registrada sob o experimento do
+     input `model` (derivado do pacote: `convolutional_autoencoder` vira
+     `convolutional-autoencoder`) do artifact `<prefixo><ticker>` de cada
+     ticker do input `tickers`, pelo
      módulo `generative_models.serving.download_latest_models`. Esse modo
      precisa da chave do wandb (secret `WANDB_API_KEY`). O módulo grava `<nome>.pt` e
      `<nome>-overfitting.json`, que o registro local lê. Os campos
@@ -71,8 +71,7 @@ ignorado.
    Docker Hub e envia as tags `<usuario>/financial-market-simulator:<tickers>`,
    `:<sha>` e `:latest`. A tag `<tickers>` é formada pelos tickers dos
    relatórios `*-overfitting.json` de `models/`, em minúsculas, ordenados e
-   unidos por `-`, por exemplo `aapl-msft`. A tag tem no máximo 120 caracteres. O usuário e o token vêm dos inputs `dockerhub_username` e
-   `dockerhub_token`, e na falta deles, dos secrets `DOCKERHUB_USERNAME` e
+   unidos por `-`, por exemplo `aapl-msft`. A tag tem no máximo 120 caracteres. O usuário e o token vêm somente dos secrets `DOCKERHUB_USERNAME` e
    `DOCKERHUB_TOKEN`. O job falha se algum dos dois estiver ausente.
 
 ## Erros esperados
@@ -83,10 +82,10 @@ ignorado.
 | Janela de log-retornos menor que a do modelo | `422` |
 | Pasta sem modelos completos | a API sobe com a lista vazia; `/models/loaded` retorna `[]` |
 | Sem `train_run_id` e sem `tickers` | o job `build-image` falha antes do download |
-| Sem `train_run_id` e sem `experiment` | o job `build-image` falha antes do download |
-| `experiment` inválido ou `latest` | o job `build-image` falha antes do download |
+| Sem `train_run_id` e sem `model` | o job `build-image` falha antes do download |
+| `model` inválido | o job `build-image` falha antes do download |
 | Sem `train_run_id` e sem chave do wandb | o job `build-image` falha antes do download |
-| Ticker sem modelo com o alias do experimento no wandb | o job `build-image` falha antes do build |
+| Ticker sem modelo sob o experimento do `model` no wandb | o job `build-image` falha antes do build |
 | `train_run_id` de um run sem o artifact `trained-models` | o job `build-image` falha |
 
 ## Critérios de aceite

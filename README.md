@@ -576,11 +576,6 @@ the workflow always uses the `WANDB_API_KEY` repository secret. Its inputs are:
   and `overfitting.py`, so a placeholder package is refused.
 - `tickers`: comma-separated ticker symbols, for example `AAPL,MSFT,PETR4.SA`.
   The jobs run once per ticker.
-- `experiment`: the name the models are registered under in wandb, for example
-  `aapl-baseline` (default `default`). The build picks the models of an
-  experiment by this name, so runs with different settings do not get mixed.
-  Use lowercase letters, digits and hyphens, at most 40 characters, not
-  `latest`.
 - `epochs`, `learning_rate` and `window_size`: training hyperparameters.
 
 It runs these jobs in order:
@@ -607,15 +602,17 @@ downloads the trained models, builds the
 Docker image, smoke tests it and scans it with Trivy.
 
 To build without a Train run, leave `train_run_id` empty and fill in `tickers`
-(for example `PETR4.SA,AAPL`) and `experiment` (for example `aapl-baseline`).
-The job then runs `generative_models.serving.download_latest_models` with
-`--alias <experiment>` and `--name-prefix <name_prefix>` (default
-`simple-autoencoder-`; use `convolutional-autoencoder-` for the convolutional
-model), which writes the model of each ticker registered under
-that experiment from wandb into `models/` before the image is built. A ticker
+(for example `PETR4.SA,AAPL`) and `model` (for example `convolutional_autoencoder`,
+the same model the Train run used). The job then runs
+`generative_models.serving.download_latest_models --model <model>`, which
+writes the model of each ticker from wandb into `models/` before the image is
+built. The experiment and the artifact name prefix are derived from the model,
+so they are not inputs: the experiment is the package name with hyphens
+(`convolutional-autoencoder`), and the prefix is the `MODEL_NAME_PREFIX` of the
+model's `trainer.py` (`simple-autoencoder-` for `base_autoencoder`,
+`convolutional-autoencoder-` for `convolutional_autoencoder`). A ticker
 without a model under that experiment fails the job before the build starts.
-The `latest` alias is not accepted as an experiment. The
-report written this way has `test_loss` and `baseline_test_loss` set to `null`,
+The report written this way has `test_loss` and `baseline_test_loss` set to `null`,
 because the wandb artifact does not store them. It fails on fixable
 `CRITICAL` or `HIGH` vulnerabilities. Then the `push-image` job logs in to
 Docker Hub and pushes the image with three tags: the tickers tag, the commit
@@ -626,10 +623,8 @@ ticker of every `*-overfitting.json` in `models/`, lowercases them, sorts them
 and joins them with `-`. For models of `AAPL` and `MSFT` the image is
 `financial-market-simulator:aapl-msft`. The tag is limited to 120 characters.
 
-The Docker Hub account and token are taken from the `dockerhub_username` and
-`dockerhub_token` inputs of the dispatch. Leave them empty to use the
-`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets. For example:
-`gh workflow run build.yml -f dockerhub_username=... -f dockerhub_token=...`.
+The Docker Hub account and token come only from the `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN` repository secrets. The build has no inputs for them.
 
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.

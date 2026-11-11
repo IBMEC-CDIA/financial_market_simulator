@@ -1,7 +1,8 @@
 """Command-line script that downloads the latest registered models.
 
-The script fetches the `latest` version of the model artifact of each
-ticker from wandb and writes the files that the local serving registry
+The script fetches the version of the model artifact of each ticker that is
+registered under the experiment of the model, from wandb, and writes the
+files that the local serving registry
 reads: the weights `<name>.pt` and the report `<name>-overfitting.json`.
 It is used by the build workflow before the Docker image is built.
 """
@@ -19,6 +20,10 @@ from generative_models.models.base_autoencoder.trainer import (
     MODEL_NAME_PREFIX,
     build_ticker_slug,
 )
+from generative_models.models.model_names import (
+    derive_experiment_name,
+    load_artifact_prefix,
+)
 from generative_models.serving.wandb_autoencoder_registry import (
     REQUIRED_METADATA_KEYS,
     WandbAutoencoderRegistry,
@@ -35,8 +40,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     Returns
     -------
     argparse.ArgumentParser
-        Parser with the options `--tickers`, `--output-directory`,
-        `--project-name` and `--entity`.
+        Parser with the options `--tickers`, `--model`,
+        `--output-directory`, `--project-name` and `--entity`.
 
     Example
     -------
@@ -74,22 +79,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="wandb entity (user or team). Defaults to the account entity.",
     )
     parser.add_argument(
-        "--alias",
+        "--model",
         type=str,
-        default=DEFAULT_ALIAS,
+        required=True,
         help=(
-            "Alias of the model version to download. Use an experiment name "
-            "to get the models of that experiment, or latest for the newest "
-            "model of each ticker."
-        ),
-    )
-    parser.add_argument(
-        "--name-prefix",
-        type=str,
-        default=MODEL_NAME_PREFIX,
-        help=(
-            "Prefix of the artifact names of the model family, for example "
-            "convolutional-autoencoder-. Must match the trained model."
+            "Model package whose models are downloaded, for example "
+            "convolutional_autoencoder. Its experiment name and artifact "
+            "prefix are derived from it."
         ),
     )
 
@@ -322,6 +318,8 @@ def main(
     """
     arguments = build_argument_parser().parse_args(command_line_arguments)
     tickers = parse_ticker_list(arguments.tickers)
+    experiment_name = derive_experiment_name(arguments.model)
+    name_prefix = load_artifact_prefix(arguments.model)
     output_directory = Path(arguments.output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
     registry = WandbAutoencoderRegistry(
@@ -335,8 +333,8 @@ def main(
             registry,
             ticker,
             output_directory,
-            alias=arguments.alias,
-            name_prefix=arguments.name_prefix,
+            alias=experiment_name,
+            name_prefix=name_prefix,
         )
         print(f"Downloaded the latest model of {ticker}: {report_path}")
         report_paths.append(report_path)
