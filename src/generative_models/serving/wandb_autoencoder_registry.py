@@ -6,29 +6,19 @@ from dotenv import load_dotenv
 import torch
 import wandb
 
-from generative_models.models.base_autoencoder.autoencoder import (
-    SimpleAutoencoder,
-)
 from generative_models.models.base_autoencoder.config import TrackingConfig
 from generative_models.models.base_autoencoder.trainer import (
     MODEL_NAME_PREFIX,
     build_ticker_slug,
 )
 from generative_models.serving.autoencoder_predictor import (
-    AutoencoderModelMetadata,
     AutoencoderPredictor,
 )
-from generative_models.registry.model_registry import ModelRegistry
-
-REQUIRED_METADATA_KEYS = (
-    "ticker",
-    "window_size",
-    "hidden_layer_size",
-    "latent_layer_size",
-    "return_train_mean",
-    "return_train_std",
-    "anomaly_threshold",
+from generative_models.serving.model_families import (
+    build_predictor,
+    find_missing_serving_keys,
 )
+from generative_models.registry.model_registry import ModelRegistry
 
 
 class WandbAutoencoderRegistry(ModelRegistry):
@@ -310,35 +300,18 @@ class WandbAutoencoderRegistry(ModelRegistry):
                 f"Artifact '{versioned_name}' has no .pt weights file."
             )
 
-        metadata = artifact.metadata
-        window_size = int(metadata["window_size"])
-        model = SimpleAutoencoder(
-            input_dim=window_size,
-            hidden_dim=int(metadata["hidden_layer_size"]),
-            latent_dim=int(metadata["latent_layer_size"]),
-        )
         state_dict = torch.load(
             weight_paths[0],
             map_location=self.device,
             weights_only=True,
         )
-        model.load_state_dict(state_dict)
-        model.to(self.device)
-
-        predictor_metadata = AutoencoderModelMetadata(
-            ticker=str(metadata["ticker"]),
-            window_size=window_size,
-            return_train_mean=float(metadata["return_train_mean"]),
-            return_train_std=float(metadata["return_train_std"]),
-            anomaly_threshold=float(metadata["anomaly_threshold"]),
+        predictor = build_predictor(
+            metadata=artifact.metadata,
+            state_dict=state_dict,
+            device=self.device,
             artifact_name=versioned_name,
         )
-        predictor = AutoencoderPredictor(
-            model=model,
-            metadata=predictor_metadata,
-            device=self.device,
-        )
-        self.models[predictor_metadata.ticker] = predictor
+        self.models[predictor.metadata.ticker] = predictor
 
         return predictor
 
@@ -378,8 +351,7 @@ def _find_missing_metadata_keys(metadata: dict) -> list[str]:
     Returns
     -------
     list[str]
-        Required keys absent from `metadata`, in the order of
-        `REQUIRED_METADATA_KEYS`. An empty list means the artifact can
-        be served.
+        Required keys absent from `metadata`, for the model family of the
+        artifact. An empty list means the artifact can be served.
     """
-    return [key for key in REQUIRED_METADATA_KEYS if key not in metadata]
+    return find_missing_serving_keys(metadata)

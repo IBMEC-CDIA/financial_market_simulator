@@ -15,7 +15,6 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from generative_models.models.base_autoencoder.config import TrackingConfig
 from generative_models.models.base_autoencoder.trainer import (
     MODEL_NAME_PREFIX,
     build_ticker_slug,
@@ -23,9 +22,13 @@ from generative_models.models.base_autoencoder.trainer import (
 from generative_models.models.model_names import (
     derive_experiment_name,
     load_artifact_prefix,
+    load_project_name,
+)
+from generative_models.serving.model_families import (
+    find_missing_serving_keys,
+    resolve_model_family,
 )
 from generative_models.serving.wandb_autoencoder_registry import (
-    REQUIRED_METADATA_KEYS,
     WandbAutoencoderRegistry,
 )
 
@@ -41,7 +44,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     -------
     argparse.ArgumentParser
         Parser with the options `--tickers`, `--model`,
-        `--output-directory`, `--project-name` and `--entity`.
+        `--output-directory` and `--entity`.
 
     Example
     -------
@@ -65,12 +68,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=str,
         default=DEFAULT_OUTPUT_DIRECTORY,
         help="Directory where the weights and reports are written.",
-    )
-    parser.add_argument(
-        "--project-name",
-        type=str,
-        default=TrackingConfig.project_name,
-        help="Name of the wandb project that holds the models.",
     )
     parser.add_argument(
         "--entity",
@@ -200,11 +197,13 @@ def build_report_data(
         "test_loss": None,
         "baseline_test_loss": None,
         "window_size": metadata["window_size"],
-        "hidden_layer_size": metadata["hidden_layer_size"],
-        "latent_layer_size": metadata["latent_layer_size"],
+        "hidden_layer_size": metadata.get("hidden_layer_size"),
+        "latent_layer_size": metadata.get("latent_layer_size"),
         "return_train_mean": metadata["return_train_mean"],
         "return_train_std": metadata["return_train_std"],
         "anomaly_threshold": metadata["anomaly_threshold"],
+        "model_family": resolve_model_family(metadata),
+        "architecture": metadata.get("architecture"),
     }
 
 
@@ -259,9 +258,7 @@ def download_latest_model(
     artifact_path = f"{registry.project_path}/{model_name}:{alias}"
     artifact = registry.api.artifact(artifact_path, type="model")
 
-    missing_keys = [
-        key for key in REQUIRED_METADATA_KEYS if key not in artifact.metadata
-    ]
+    missing_keys = find_missing_serving_keys(artifact.metadata)
     if missing_keys:
         raise ValueError(
             f"Artifact '{artifact_path}' is missing metadata required "
@@ -320,10 +317,11 @@ def main(
     tickers = parse_ticker_list(arguments.tickers)
     experiment_name = derive_experiment_name(arguments.model)
     name_prefix = load_artifact_prefix(arguments.model)
+    project_name = load_project_name(arguments.model)
     output_directory = Path(arguments.output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
     registry = WandbAutoencoderRegistry(
-        project_name=arguments.project_name,
+        project_name=project_name,
         entity=arguments.entity,
     )
 

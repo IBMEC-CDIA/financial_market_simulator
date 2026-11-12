@@ -1,4 +1,4 @@
-name: Build
+name: 03 - Build API
 
 on:
   workflow_dispatch:
