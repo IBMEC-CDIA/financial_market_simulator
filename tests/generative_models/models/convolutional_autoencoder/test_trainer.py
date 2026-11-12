@@ -343,6 +343,10 @@ def test_log_model_metadata_contains_training_summary(
         "return_train_std",
         "best_epoch",
         "stopped_at_epoch",
+        "ticker",
+        "window_size",
+        "model_family",
+        "architecture",
     }
 
 

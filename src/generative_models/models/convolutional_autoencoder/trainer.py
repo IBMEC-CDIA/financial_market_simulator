@@ -30,6 +30,7 @@ from generative_models.tracking.wandb_tracker import (
 )
 
 MODEL_NAME_PREFIX = "convolutional-autoencoder-"
+MODEL_FAMILY = "convolutional_autoencoder"
 WANDB_PROJECT_NAME = TrackingConfig.project_name
 
 
@@ -618,6 +619,18 @@ class ConvolutionalAutoencoderTrainer:
                     "return_train_std": prepared_data.return_train_std,
                     "best_epoch": fit_outcome.best_epoch,
                     "stopped_at_epoch": fit_outcome.stopped_at_epoch,
+                    "ticker": self.ticker,
+                    "window_size": self.config.market_data.window_size,
+                    "model_family": MODEL_FAMILY,
+                    "architecture": {
+                        "input_dim": self.config.market_data.window_size,
+                        "hidden_channels": (
+                            self.config.architecture.hidden_channel_count
+                        ),
+                        "latent_dim": (
+                            self.config.architecture.latent_layer_size
+                        ),
+                    },
                 },
                 aliases=[self.config.tracking.experiment_name],
             )
