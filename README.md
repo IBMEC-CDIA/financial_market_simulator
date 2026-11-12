@@ -633,8 +633,13 @@ before the family was saved are read as `base_autoencoder`.
 
 The image name is built from the models that the API reads. The build reads the
 ticker of every `*-overfitting.json` in `models/`, lowercases them, sorts them
-and joins them with `-`. For models of `AAPL` and `MSFT` the image is
-`financial-market-simulator:aapl-msft`. The tag is limited to 120 characters.
+and joins them with `-`. When the build has a `model` input, the model name
+comes first, with underscores turned into hyphens. For `gru_autoencoder` and
+models of `AAPL` and `MSFT` the image is
+`financial-market-simulator:gru-autoencoder-aapl-msft`, so the images of
+different models do not overwrite each other. Without a `model` (a build from a
+Train run) the tag is only the tickers, for example `aapl-msft`. The tag is
+limited to 120 characters.
 
 The Docker Hub account and token come only from the `DOCKERHUB_USERNAME` and
 `DOCKERHUB_TOKEN` repository secrets. The build has no inputs for them.
@@ -646,8 +651,8 @@ unless every job before it succeeded.
 
 The deploy workflow is started by hand, with Run workflow. It replaces an Azure
 container instance so that it runs an image from Docker Hub. The only input is
-`image`, for example `myuser/financial-market-simulator:aapl-msft`, as the Build
-workflow pushes it.
+`image`, for example `myuser/financial-market-simulator:gru-autoencoder-aapl-msft`,
+as the Build workflow pushes it.
 
 The container name and the DNS label are derived from the tag. The tag
 `aapl-msft` gives the container `fmsim-aapl-msft`, and a dot becomes a hyphen,

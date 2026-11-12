@@ -133,8 +133,13 @@ jobs:
       - name: Name the image after the tickers of the models
         id: image-name
         run: |
-          image_tag=$(jq -r '.ticker' models/*-overfitting.json             | tr '[:upper:]' '[:lower:]'             | sed 's/[^a-z0-9._-]/-/g'             | sort -u             | paste -sd- -)
-          if [ -z "$image_tag" ]; then
+          tickers_tag=$(jq -r '.ticker' models/*-overfitting.json             | tr '[:upper:]' '[:lower:]'             | sed 's/[^a-z0-9._-]/-/g'             | sort -u             | paste -sd- -)
+          image_tag="$tickers_tag"
+          if [ -n "$MODEL" ]; then
+            model_tag=$(printf '%s' "$MODEL" | tr '_' '-')
+            image_tag="$model_tag-$tickers_tag"
+          fi
+          if [ -z "$tickers_tag" ]; then
             echo "No model report was found in models/."
             exit 1
           fi

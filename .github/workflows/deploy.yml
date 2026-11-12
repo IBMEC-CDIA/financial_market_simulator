@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       image:
-        description: "Docker Hub image to deploy, in the form <user>/financial-market-simulator:<tickers>, for example myuser/financial-market-simulator:aapl-msft. The Build workflow pushes it. The container name and the DNS label are derived from the tickers in the tag."
+        description: "Docker Hub image to deploy, in the form <user>/financial-market-simulator:<model>-<tickers>, for example myuser/financial-market-simulator:gru-autoencoder-aapl-msft (or <tickers> alone, for example aapl-msft). The Build workflow pushes it. The container name and the DNS label are derived from the tag."
         required: true
         type: string
 
