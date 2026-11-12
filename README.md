@@ -620,6 +620,17 @@ because the wandb artifact does not store them. It fails on fixable
 Docker Hub and pushes the image with three tags: the tickers tag, the commit
 SHA and `latest`.
 
+The API serves each model with the architecture of its own family. A model
+family (`base_autoencoder`, `gru_autoencoder`, `lstm_autoencoder`,
+`convolutional_autoencoder`) is served when its package has a `serving.py`
+module with two functions: `build_model(architecture)`, which creates the
+network from the constructor arguments saved in the artifact metadata as
+`architecture`, and `score_windows(model, input_tensor)`, which returns the
+reconstruction error of each window. The metadata of a new model must also
+have `model_family`, `architecture`, `ticker`, `window_size`,
+`return_train_mean`, `return_train_std` and `anomaly_threshold`. Models stored
+before the family was saved are read as `base_autoencoder`.
+
 The image name is built from the models that the API reads. The build reads the
 ticker of every `*-overfitting.json` in `models/`, lowercases them, sorts them
 and joins them with `-`. For models of `AAPL` and `MSFT` the image is

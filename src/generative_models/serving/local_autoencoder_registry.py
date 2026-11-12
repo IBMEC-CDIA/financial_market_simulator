@@ -8,9 +8,6 @@ from pathlib import Path
 
 import torch
 
-from generative_models.models.base_autoencoder.autoencoder import (
-    SimpleAutoencoder,
-)
 from generative_models.models.base_autoencoder.overfitting import (
     load_overfitting_report,
 )
@@ -19,22 +16,18 @@ from generative_models.models.base_autoencoder.trainer import (
     build_ticker_slug,
 )
 from generative_models.serving.autoencoder_predictor import (
-    AutoencoderModelMetadata,
     AutoencoderPredictor,
+)
+from generative_models.serving.model_families import (
+    build_predictor as build_family_predictor,
+)
+from generative_models.serving.model_families import (
+    find_missing_serving_keys,
 )
 from generative_models.registry.model_registry import ModelRegistry
 
 REPORT_SUFFIX = "-overfitting.json"
 LOCAL_VERSION = "local"
-REQUIRED_SERVING_KEYS = (
-    "ticker",
-    "window_size",
-    "hidden_layer_size",
-    "latent_layer_size",
-    "return_train_mean",
-    "return_train_std",
-    "anomaly_threshold",
-)
 
 
 @dataclass
@@ -63,26 +56,6 @@ class LocalModelArtifact:
     weight_path: Path
 
 
-def find_missing_serving_keys(metadata: dict) -> list[str]:
-    """List the values that inference needs and the metadata does not have.
-
-    Parameters
-    ----------
-    metadata : dict
-        Values of an overfitting report.
-
-    Returns
-    -------
-    list[str]
-        Missing keys, in the order of `REQUIRED_SERVING_KEYS`.
-    """
-    return [
-        key
-        for key in REQUIRED_SERVING_KEYS
-        if metadata.get(key) is None
-    ]
-
-
 def build_predictor(
     artifact: LocalModelArtifact,
     device: str,
@@ -101,34 +74,17 @@ def build_predictor(
     AutoencoderPredictor
         Predictor ready for inference.
     """
-    metadata = artifact.metadata
-    window_size = int(metadata["window_size"])
-    model = SimpleAutoencoder(
-        input_dim=window_size,
-        hidden_dim=int(metadata["hidden_layer_size"]),
-        latent_dim=int(metadata["latent_layer_size"]),
-    )
     state_dict = torch.load(
         artifact.weight_path,
         map_location=device,
         weights_only=True,
     )
-    model.load_state_dict(state_dict)
-    model.to(device)
 
-    predictor_metadata = AutoencoderModelMetadata(
-        ticker=str(metadata["ticker"]),
-        window_size=window_size,
-        return_train_mean=float(metadata["return_train_mean"]),
-        return_train_std=float(metadata["return_train_std"]),
-        anomaly_threshold=float(metadata["anomaly_threshold"]),
-        artifact_name=f"{artifact.name}:{artifact.version}",
-    )
-
-    return AutoencoderPredictor(
-        model=model,
-        metadata=predictor_metadata,
+    return build_family_predictor(
+        metadata=artifact.metadata,
+        state_dict=state_dict,
         device=device,
+        artifact_name=f"{artifact.name}:{artifact.version}",
     )
 
 
