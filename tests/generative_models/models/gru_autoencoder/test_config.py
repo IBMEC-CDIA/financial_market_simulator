@@ -24,6 +24,7 @@ EXPECTED_FLAT_KEYS = {
     "learning_rate",
     "random_seed",
     "project_name",
+    "experiment_name",
     "output_directory",
     "env_file_path",
     "contamination",

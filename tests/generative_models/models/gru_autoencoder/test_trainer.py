@@ -291,6 +291,10 @@ def test_log_model_metadata_contains_training_summary(
         "anomaly_threshold",
         "return_train_mean",
         "return_train_std",
+        "ticker",
+        "window_size",
+        "model_family",
+        "architecture",
     }
 
 

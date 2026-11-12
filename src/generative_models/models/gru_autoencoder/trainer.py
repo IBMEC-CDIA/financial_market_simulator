@@ -22,12 +22,15 @@ from generative_models.models.gru_autoencoder.autoencoder import (
 )
 from generative_models.models.gru_autoencoder.config import (
     GRUAutoencoderTrainingConfig,
+    TrackingConfig,
 )
 from generative_models.tracking.wandb_tracker import (
     WandbExperimentTracker,
 )
 
 MODEL_NAME_PREFIX = "gru_autoencoder-"
+MODEL_FAMILY = "gru_autoencoder"
+WANDB_PROJECT_NAME = TrackingConfig.project_name
 
 
 @dataclass
@@ -579,7 +582,20 @@ class GRUAutoencoderTrainer:
                     "anomaly_threshold": anomaly_threshold,
                     "return_train_mean": prepared_data.return_train_mean,
                     "return_train_std": prepared_data.return_train_std,
+                    "ticker": self.ticker,
+                    "window_size": self.config.market_data.window_size,
+                    "model_family": MODEL_FAMILY,
+                    "architecture": {
+                        "input_dim": self.config.market_data.window_size,
+                        "hidden_dim": (
+                            self.config.architecture.hidden_layer_size
+                        ),
+                        "latent_dim": (
+                            self.config.architecture.latent_layer_size
+                        ),
+                    },
                 },
+                aliases=[self.config.tracking.experiment_name],
             )
         finally:
             self.experiment_tracker.finish_run()
