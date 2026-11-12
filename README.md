@@ -47,12 +47,12 @@ branch.
 
 ```mermaid
 flowchart LR
-    Yahoo[(Yahoo Finance prices)] --> Train[Train workflow]
+    Yahoo[(Yahoo Finance prices)] --> Train[02 - Train Model]
     Train --> Wandb[(Weights and Biases)]
     Train --> Artifact[(trained-models artifact)]
-    Artifact --> Build[Build workflow]
+    Artifact --> Build[03 - Build API]
     Build --> Hub[(Docker Hub image)]
-    Hub --> Deploy[Deploy workflow]
+    Hub --> Deploy[04 - Deploy API]
     Deploy --> Azure[Azure container instance]
     Client[Client] --> Azure
     Local[models/ folder] -.-> Azure
@@ -539,7 +539,7 @@ Four workflows in `.github/workflows/` run the project:
 | Build | `build.yml` | By hand | Builds and tests the Docker image, then pushes it to Docker Hub. |
 | Deploy | `deploy.yml` | By hand | Replaces the Azure container instance with an image from Docker Hub. |
 
-The CI workflow has these jobs:
+The CI workflow (`01 - Continuous Integration`) has these jobs:
 
 - `structure` checks the required files, that `.env` is ignored by git and
   Docker and never tracked, and the layout of the model packages.
@@ -564,7 +564,7 @@ neither network access nor a wandb key:
 uv run pytest tests/end_to_end
 ```
 
-### Training workflow (`train.yml`)
+### Training workflow (`train.yml`, shown as `02 - Train Model`)
 
 The training workflow is started by hand from the Actions tab (Run workflow),
 or from the command line with
@@ -594,7 +594,7 @@ It runs these jobs in order:
    report in that artifact.
 7. `pipeline-success` fails unless every job above succeeded.
 
-### Build workflow (`build.yml`)
+### Build workflow (`build.yml`, shown as `03 - Build API`)
 
 The build workflow is also started by hand, with Run workflow. It waits for the
 CI run of the same commit to finish, fails unless that run passed, then
@@ -606,8 +606,10 @@ To build without a Train run, leave `train_run_id` empty and fill in `tickers`
 the same model the Train run used). The job then runs
 `generative_models.serving.download_latest_models --model <model>`, which
 writes the model of each ticker from wandb into `models/` before the image is
-built. The experiment and the artifact name prefix are derived from the model,
-so they are not inputs: the experiment is the package name with hyphens
+built. The wandb project, the experiment and the artifact name prefix are
+derived from the model, so they are not inputs. The project is the
+`WANDB_PROJECT_NAME` of the model's `trainer.py`, the experiment is the package
+name with hyphens
 (`convolutional-autoencoder`), and the prefix is the `MODEL_NAME_PREFIX` of the
 model's `trainer.py` (`simple-autoencoder-` for `base_autoencoder`,
 `convolutional-autoencoder-` for `convolutional_autoencoder`). A ticker
@@ -617,6 +619,17 @@ because the wandb artifact does not store them. It fails on fixable
 `CRITICAL` or `HIGH` vulnerabilities. Then the `push-image` job logs in to
 Docker Hub and pushes the image with three tags: the tickers tag, the commit
 SHA and `latest`.
+
+The API serves each model with the architecture of its own family. A model
+family (`base_autoencoder`, `gru_autoencoder`, `lstm_autoencoder`,
+`convolutional_autoencoder`) is served when its package has a `serving.py`
+module with two functions: `build_model(architecture)`, which creates the
+network from the constructor arguments saved in the artifact metadata as
+`architecture`, and `score_windows(model, input_tensor)`, which returns the
+reconstruction error of each window. The metadata of a new model must also
+have `model_family`, `architecture`, `ticker`, `window_size`,
+`return_train_mean`, `return_train_std` and `anomaly_threshold`. Models stored
+before the family was saved are read as `base_autoencoder`.
 
 The image name is built from the models that the API reads. The build reads the
 ticker of every `*-overfitting.json` in `models/`, lowercases them, sorts them
@@ -629,7 +642,7 @@ The Docker Hub account and token come only from the `DOCKERHUB_USERNAME` and
 Both `train.yml` and `build.yml` end with a `pipeline-success` job. It fails
 unless every job before it succeeded.
 
-### Deploy workflow (`deploy.yml`)
+### Deploy workflow (`deploy.yml`, shown as `04 - Deploy API`)
 
 The deploy workflow is started by hand, with Run workflow. It replaces an Azure
 container instance so that it runs an image from Docker Hub. The only input is

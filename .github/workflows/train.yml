@@ -1,4 +1,4 @@
-name: Train
+name: 02 - Train Model
 
 on:
   workflow_dispatch:

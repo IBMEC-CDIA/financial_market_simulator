@@ -225,6 +225,35 @@ def test_download_uses_the_name_prefix_of_the_model_family(tmp_path) -> None:
     )
 
 
+def test_main_opens_the_wandb_project_of_the_model(
+    tmp_path, monkeypatch
+) -> None:
+    """Check that the registry reads the wandb project of the model family."""
+    artifact = _build_fake_artifact(_metadata(), ["weights.pt"])
+    registry = _registry_with(artifact)
+    registry_class = MagicMock(return_value=registry)
+    monkeypatch.setattr(
+        download_latest_models,
+        "WandbAutoencoderRegistry",
+        registry_class,
+    )
+
+    main(
+        [
+            "--tickers",
+            "AAPL",
+            "--model",
+            "base_autoencoder",
+            "--output-directory",
+            str(tmp_path / "models"),
+        ]
+    )
+
+    assert registry_class.call_args.kwargs["project_name"] == (
+        "autoencoder-simple-outlier-trading-agent"
+    )
+
+
 def test_download_model_of_an_experiment_uses_its_alias(tmp_path) -> None:
     """Check that the alias of the experiment selects the artifact version."""
     artifact = _build_fake_artifact(_metadata(), ["weights.pt"])

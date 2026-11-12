@@ -68,7 +68,6 @@ uv run python -m generative_models.serving.download_latest_models \
 |---|---|---|---|
 | `--tickers` | sim | - | Tickers separados por vírgula. Espaços e itens vazios são ignorados. |
 | `--output-directory` | não | `models` | Pasta onde os arquivos são gravados. É criada se não existir. |
-| `--project-name` | não | `TrackingConfig.project_name` | Projeto do wandb onde estão os modelos. |
 | `--entity` | não | conta padrão do wandb | Usuário ou time do wandb. |
 | `--model` | sim | - | Pacote do modelo, por exemplo `convolutional_autoencoder`. Dele saem o experimento (`convolutional-autoencoder`) e o prefixo dos artifacts (`MODEL_NAME_PREFIX` do `trainer.py`). |
 
