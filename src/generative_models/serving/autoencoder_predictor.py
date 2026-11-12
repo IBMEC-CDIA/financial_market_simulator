@@ -1,17 +1,18 @@
 """Inference wrapper that scores new data with a trained autoencoder."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 import torch
+from torch import nn
 
 from generative_models.data.normalization import normalize_series
-from generative_models.models.base_autoencoder.autoencoder import (
-    SimpleAutoencoder,
-)
 from generative_models.models.base_autoencoder.trainer import (
     compute_reconstruction_scores,
 )
+
+ReconstructionScorer = Callable[[nn.Module, torch.Tensor], np.ndarray]
 
 
 @dataclass
@@ -76,22 +77,28 @@ class AutoencoderPredictor:
 
     Parameters
     ----------
-    model : SimpleAutoencoder
+    model : nn.Module
         Trained autoencoder, already on `device`. It is put in
         evaluation mode.
     metadata : AutoencoderModelMetadata
         Training metadata of the model.
     device : str
         Device where the windows are scored.
+    reconstruction_scorer : ReconstructionScorer | None
+        Function that returns the reconstruction score of each window of
+        the model. The model family provides it. Defaults to the base
+        autoencoder scorer.
 
     Attributes
     ----------
-    model : SimpleAutoencoder
+    model : nn.Module
         Autoencoder in evaluation mode.
     metadata : AutoencoderModelMetadata
         Training metadata of the model.
     device : str
         Device where the windows are scored.
+    reconstruction_scorer : ReconstructionScorer
+        Function used to score the windows.
 
     Example
     -------
@@ -103,14 +110,18 @@ class AutoencoderPredictor:
 
     def __init__(
         self,
-        model: SimpleAutoencoder,
+        model: nn.Module,
         metadata: AutoencoderModelMetadata,
         device: str = "cpu",
+        reconstruction_scorer: ReconstructionScorer | None = None,
     ) -> None:
-        """Store the model and metadata and put the model in eval mode."""
+        """Store the model, its metadata and its scorer, in eval mode."""
         self.model = model
         self.metadata = metadata
         self.device = device
+        self.reconstruction_scorer = (
+            reconstruction_scorer or compute_reconstruction_scores
+        )
         self.model.eval()
 
     def predict(
@@ -160,7 +171,7 @@ class AutoencoderPredictor:
         window_tensor = normalized_tensor.unfold(0, window_size, 1).to(
             self.device
         )
-        reconstruction_scores = compute_reconstruction_scores(
+        reconstruction_scores = self.reconstruction_scorer(
             self.model,
             window_tensor,
         )

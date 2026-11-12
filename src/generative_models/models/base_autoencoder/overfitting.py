@@ -42,6 +42,12 @@ class OverfittingReport:
         had no test split.
     baseline_test_loss : float | None
         Mean squared error of the naive zero prediction on the test set.
+    model_family : str | None
+        Model package that produced the weights, for example
+        `"lstm_autoencoder"`. `None` for reports written before the family
+        was stored, which are the base autoencoder.
+    architecture : dict[str, int] | None
+        Constructor arguments needed to rebuild the network when serving.
     """
 
     ticker: str
@@ -58,6 +64,8 @@ class OverfittingReport:
     return_train_mean: float | None = None
     return_train_std: float | None = None
     anomaly_threshold: float | None = None
+    model_family: str | None = None
+    architecture: dict[str, int] | None = None
 
 
 def build_overfitting_report(

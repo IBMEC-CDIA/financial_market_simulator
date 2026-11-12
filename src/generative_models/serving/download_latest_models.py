@@ -24,8 +24,11 @@ from generative_models.models.model_names import (
     load_artifact_prefix,
     load_project_name,
 )
+from generative_models.serving.model_families import (
+    find_missing_serving_keys,
+    resolve_model_family,
+)
 from generative_models.serving.wandb_autoencoder_registry import (
-    REQUIRED_METADATA_KEYS,
     WandbAutoencoderRegistry,
 )
 
@@ -194,11 +197,13 @@ def build_report_data(
         "test_loss": None,
         "baseline_test_loss": None,
         "window_size": metadata["window_size"],
-        "hidden_layer_size": metadata["hidden_layer_size"],
-        "latent_layer_size": metadata["latent_layer_size"],
+        "hidden_layer_size": metadata.get("hidden_layer_size"),
+        "latent_layer_size": metadata.get("latent_layer_size"),
         "return_train_mean": metadata["return_train_mean"],
         "return_train_std": metadata["return_train_std"],
         "anomaly_threshold": metadata["anomaly_threshold"],
+        "model_family": resolve_model_family(metadata),
+        "architecture": metadata.get("architecture"),
     }
 
 
@@ -253,9 +258,7 @@ def download_latest_model(
     artifact_path = f"{registry.project_path}/{model_name}:{alias}"
     artifact = registry.api.artifact(artifact_path, type="model")
 
-    missing_keys = [
-        key for key in REQUIRED_METADATA_KEYS if key not in artifact.metadata
-    ]
+    missing_keys = find_missing_serving_keys(artifact.metadata)
     if missing_keys:
         raise ValueError(
             f"Artifact '{artifact_path}' is missing metadata required "
