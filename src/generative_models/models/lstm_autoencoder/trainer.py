@@ -26,12 +26,15 @@ from generative_models.models.lstm_autoencoder.autoencoder import (
 )
 from generative_models.models.lstm_autoencoder.config import (
     LSTMAutoencoderTrainingConfig,
+    TrackingConfig,
 )
 from generative_models.tracking.wandb_tracker import (
     WandbExperimentTracker,
 )
 
 MODEL_NAME_PREFIX = "lstm-autoencoder-"
+MODEL_FAMILY = "lstm_autoencoder"
+WANDB_PROJECT_NAME = TrackingConfig.project_name
 REQUIRED_PRICE_COLUMNS = ("close_price", "split")
 TRAIN_SPLIT_LABEL = "train"
 VALIDATION_SPLIT_LABEL = "validation"
@@ -561,6 +564,18 @@ class LSTMAutoencoderTrainer:
                     "anomaly_threshold": anomaly_threshold,
                     "return_train_mean": prepared_data.return_train_mean,
                     "return_train_std": prepared_data.return_train_std,
+                    "ticker": self.ticker,
+                    "window_size": self.config.market_data.window_size,
+                    "model_family": MODEL_FAMILY,
+                    "architecture": {
+                        "window_size": self.config.market_data.window_size,
+                        "hidden_dim": (
+                            self.config.architecture.hidden_layer_size
+                        ),
+                        "latent_dim": (
+                            self.config.architecture.latent_layer_size
+                        ),
+                    },
                 },
                 aliases=[self.config.tracking.experiment_name],
             )
